@@ -9,8 +9,8 @@ use axum::extract::{Path, State};
 use axum::http::header::SET_COOKIE;
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Duration, Utc};
-use noemune_core::protocol::SessionStatus;
-use noemune_core::{GrantSet, Role};
+use hyperbeam_core::protocol::SessionStatus;
+use hyperbeam_core::{GrantSet, Role};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -326,7 +326,7 @@ pub async fn create_invite(State(app): State<App>, actor: AuthUser, Json(body): 
     .bind(Utc::now() + Duration::days(7))
     .execute(&app.db)
     .await?;
-    // Noemune sends no email; the admin passes this link on. Shown once.
+    // Hyperbeam sends no email; the admin passes this link on. Shown once.
     let url = format!("{}/invite/{token}", app.cfg.public_url.trim_end_matches('/'));
     Ok(Json(json!({ "id": id, "email": email, "url": url })))
 }

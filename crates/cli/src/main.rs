@@ -1,4 +1,4 @@
-//! `noemune`: start, follow and steer agents from a terminal.
+//! `hyperbeam`: start, follow and steer agents from a terminal.
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "noemune", version, about = "Command-line client for a Noemune server")]
+#[command(name = "hyperbeam", version, about = "Command-line client for a Hyperbeam server")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -20,11 +20,11 @@ struct Cli {
 enum Command {
     /// Save the server address and an API key (create one under Settings → My account).
     Login {
-        /// Server URL, e.g. https://noemune.example.com
+        /// Server URL, e.g. https://hyperbeam.example.com
         #[arg(long)]
         server: String,
-        /// API key. Read from NOEMUNE_API_KEY or prompted for when omitted.
-        #[arg(long, env = "NOEMUNE_API_KEY", hide_env_values = true)]
+        /// API key. Read from HYPERBEAM_API_KEY or prompted for when omitted.
+        #[arg(long, env = "HYPERBEAM_API_KEY", hide_env_values = true)]
         key: Option<String>,
     },
     /// Show who you are signed in as.
@@ -114,7 +114,7 @@ fn config_path() -> Result<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .ok_or_else(|| anyhow!("cannot find a home directory for the config file"))?;
-    Ok(base.join("noemune").join("config.json"))
+    Ok(base.join("hyperbeam").join("config.json"))
 }
 
 struct Client {
@@ -126,12 +126,12 @@ struct Client {
 impl Client {
     fn load() -> Result<Self> {
         // Environment wins, so CI needs no config file.
-        let from_env = std::env::var("NOEMUNE_SERVER").ok().zip(std::env::var("NOEMUNE_API_KEY").ok());
+        let from_env = std::env::var("HYPERBEAM_SERVER").ok().zip(std::env::var("HYPERBEAM_API_KEY").ok());
         let (server, key) = match from_env {
             Some(pair) => pair,
             None => {
                 let path = config_path()?;
-                let raw = std::fs::read_to_string(&path).map_err(|_| anyhow!("not signed in: run `noemune login --server <url>` first"))?;
+                let raw = std::fs::read_to_string(&path).map_err(|_| anyhow!("not signed in: run `hyperbeam login --server <url>` first"))?;
                 let cfg: Config = serde_json::from_str(&raw).with_context(|| format!("{} is corrupt", path.display()))?;
                 (cfg.server, cfg.key)
             }
@@ -332,7 +332,7 @@ async fn started(client: &Client, session: &Value, follow: bool) -> Result<()> {
     if follow {
         client.stream(id, Until::TurnEnds, 0).await?;
     } else {
-        println!("Follow with: noemune logs -f {}", short(id));
+        println!("Follow with: hyperbeam logs -f {}", short(id));
     }
     Ok(())
 }

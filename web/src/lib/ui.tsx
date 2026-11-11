@@ -113,7 +113,7 @@ export function useTick(ms = 30000) {
 
 export function useDocumentTitle(title: string | null | undefined) {
   useEffect(() => {
-    document.title = title ? `${title} · Noemune` : "Noemune";
+    document.title = title ? `${title} · Hyperbeam` : "Hyperbeam";
   }, [title]);
 }
 

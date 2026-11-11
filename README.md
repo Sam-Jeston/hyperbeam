@@ -1,9 +1,11 @@
-# Noemune
+# Hyperbeam
+
+*Because it’s the best move.*
 
 **A self-hosted platform where a team's coding agents work in the open.**
 
 Today most agent work happens in someone's terminal and stays invisible until a pull request appears.
-Noemune moves that work one level up: anyone on the team can describe an outcome, an agent picks it up in
+Hyperbeam moves that work one level up: anyone on the team can describe an outcome, an agent picks it up in
 its own sandbox, and everyone can watch the scoping and the building as it happens.
 
 - **A shared board.** Workstreams move from scoping to building to review. Each shows the agents on it,
@@ -12,7 +14,7 @@ its own sandbox, and everyone can watch the scoping and the building as it happe
   [Agent Client Protocol](https://agentclientprotocol.com). Bring a team API key or your own credential.
 - **Permissions that belong to people.** An agent can do only what the person who started it may:
   GitHub (read, write, open PR, merge PR), Linear (read, write), Notion (read, write), per repository.
-- **Agents never hold your credentials.** GitHub, Linear and Notion are reached through Noemune's tool
+- **Agents never hold your credentials.** GitHub, Linear and Notion are reached through Hyperbeam's tool
   gateway and git proxy, which check every request and record it.
 - **A conductor.** One agent that scopes a request, starts worker agents across repositories, and is
   told when each reports back.
@@ -24,13 +26,13 @@ its own sandbox, and everyone can watch the scoping and the building as it happe
 ```
  Browser / CLI
       │  REST + server-sent events
-┌─────▼────────────────── noemune-server ────────────────────────┐
+┌─────▼────────────────── hyperbeam-server ────────────────────────┐
 │ API · teams and permissions · session manager · event log      │
 │ tool gateway (MCP) · git proxy · egress allowlist proxy        │
 └─────┬──────────────────────────────────┬───────────────────────┘
       │ Postgres (all state)             │ one pod per live session
 ┌─────▼──────────────── agent sandbox ───────────────────────────┐
-│ noemune-runner ⇄ ACP over stdio ⇄ harness (Claude Code, …)     │
+│ hyperbeam-runner ⇄ ACP over stdio ⇄ harness (Claude Code, …)     │
 │ may reach: the control plane. Nothing else, except through it. │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -49,18 +51,18 @@ holds *now*, so removing a permission from a person takes effect on their runnin
 
 ## Quick start on a laptop
 
-This runs agents as ordinary local processes with **no isolation**. It is for trying Noemune out.
+This runs agents as ordinary local processes with **no isolation**. It is for trying Hyperbeam out.
 
 ```sh
-docker run -d --name noemune-pg -e POSTGRES_USER=noemune -e POSTGRES_PASSWORD=noemune \
-  -e POSTGRES_DB=noemune -p 127.0.0.1:5440:5432 postgres:16
+docker run -d --name hyperbeam-pg -e POSTGRES_USER=hyperbeam -e POSTGRES_PASSWORD=hyperbeam \
+  -e POSTGRES_DB=hyperbeam -p 127.0.0.1:5440:5432 postgres:16
 
 (cd web && bun install && bun run build)      # the UI is embedded in the server binary
 cargo build --release
 
-export NOEMUNE_DATABASE_URL=postgres://noemune:noemune@127.0.0.1:5440/noemune
-export NOEMUNE_MASTER_KEY=$(./target/release/noemune-server gen-key)   # keep it: it encrypts stored credentials
-./target/release/noemune-server serve
+export HYPERBEAM_DATABASE_URL=postgres://hyperbeam:hyperbeam@127.0.0.1:5440/hyperbeam
+export HYPERBEAM_MASTER_KEY=$(./target/release/hyperbeam-server gen-key)   # keep it: it encrypts stored credentials
+./target/release/hyperbeam-server serve
 ```
 
 Open <http://localhost:8080>. The first person in creates the team and owns it.
@@ -80,19 +82,19 @@ the task and start the agent.
 Build and push the images (the project does not publish images yet):
 
 ```sh
-docker build -f deploy/docker/Dockerfile --target server -t REGISTRY/noemune/server:0.1.0 .
-docker build -f deploy/docker/Dockerfile --target runner -t REGISTRY/noemune/runner:0.1.0 .
-docker build -f deploy/docker/Dockerfile.harness --target claude-code -t REGISTRY/noemune/harness-claude-code:0.1.0 .
+docker build -f deploy/docker/Dockerfile --target server -t REGISTRY/hyperbeam/server:0.1.0 .
+docker build -f deploy/docker/Dockerfile --target runner -t REGISTRY/hyperbeam/runner:0.1.0 .
+docker build -f deploy/docker/Dockerfile.harness --target claude-code -t REGISTRY/hyperbeam/harness-claude-code:0.1.0 .
 ```
 
 Install the chart:
 
 ```sh
-helm install noemune deploy/helm/noemune --namespace noemune --create-namespace \
+helm install hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --create-namespace \
   --set masterKey="$(openssl rand -base64 32)" \
-  --set image.repository=REGISTRY/noemune/server \
-  --set agents.runnerImage.repository=REGISTRY/noemune/runner \
-  --set publicUrl=https://noemune.example.com
+  --set image.repository=REGISTRY/hyperbeam/server \
+  --set agents.runnerImage.repository=REGISTRY/hyperbeam/runner \
+  --set publicUrl=https://hyperbeam.example.com
 ```
 
 Then, in the UI, set each harness profile's image under *Settings → Harnesses* to the one you pushed.
@@ -100,7 +102,7 @@ Then, in the UI, set each harness profile's image under *Settings → Harnesses*
 What the chart creates:
 
 - the control plane (one replica) and, unless you set `database.url`, a single-instance Postgres;
-- a namespace for sandboxes (`noemune-agents`), under the `restricted` Pod Security Standard, where the
+- a namespace for sandboxes (`hyperbeam-agents`), under the `restricted` Pod Security Standard, where the
   control plane may create and delete pods and their token secrets, and nothing else;
 - a NetworkPolicy that lets sandboxes reach only the control plane and cluster DNS. With
   `egress.enforce: true` (the default) everything else goes through the allowlist proxy.
@@ -116,12 +118,12 @@ resumed with a message, in a fresh sandbox, from the branch it pushed.
 
 ## Setting up a team
 
-1. **Connect GitHub** (*Settings → Integrations*). Use a GitHub App for an organisation: Noemune then
+1. **Connect GitHub** (*Settings → Integrations*). Use a GitHub App for an organisation: Hyperbeam then
    mints a short-lived token per repository per request. A fine-grained access token works for one person.
 2. **Register repositories** (*Settings → Repositories*). Agents can reach only these.
 3. **Give a harness a credential** (*Settings → Harnesses*): a team API key, or each person's own.
 4. **Invite people** (*People & permissions*) and tick what each person's agents may do.
-   Noemune sends no email; you pass the invite link on.
+   Hyperbeam sends no email; you pass the invite link on.
 5. Optionally connect Linear and Notion, and add skills and workflows in the *Library*.
 
 ### Permissions
@@ -143,14 +145,14 @@ owner's permissions.
 
 ### Models
 
-Each session runs on a model you choose when starting it (*New work*, `noemune run --model`, or
+Each session runs on a model you choose when starting it (*New work*, `hyperbeam run --model`, or
 `model:` in a workflow). A harness profile can set the default used when nobody chooses, and can
 limit the choice to a list (*Settings → Harnesses → Edit*). A conductor's workers inherit its model
 unless it picks another for a piece of work.
 
-The list offered comes from the harness itself: Noemune reads the standard ACP `model` session
+The list offered comes from the harness itself: Hyperbeam reads the standard ACP `model` session
 option and remembers what each harness reported. It asks as soon as it can: when a harness is
-given a credential, or its image or command changes, Noemune starts the harness for a few seconds
+given a credential, or its image or command changes, Hyperbeam starts the harness for a few seconds
 in a sandbox of its own, records the list and removes the sandbox, so the picker is correct before
 anyone's first session. *Refresh models* under *Settings → Harnesses* asks again. That sandbox is
 not a session: it has no repositories, tools or permissions. A model the harness does not recognise does not fail the session; it runs on the harness
@@ -160,7 +162,7 @@ profile can name a variable that also receives the choice.
 ### Subscription credentials
 
 Harness profiles can accept a personal subscription token (for Claude Code,
-`claude setup-token`) as well as an API key. Noemune treats these as personal: they can only be set by
+`claude setup-token`) as well as an API key. Hyperbeam treats these as personal: they can only be set by
 their owner for their own sessions, never as a team credential. Whether a subscription may be used
 this way is decided by the provider's terms, which changed more than once during 2026. For a team or
 anything automated, use API keys.
@@ -193,32 +195,32 @@ Skills use the open `SKILL.md` format and are installed into each sandbox at `.c
 Create an API key under *Settings → My account*, then:
 
 ```sh
-noemune login --server https://noemune.example.com
-noemune run "Fix the flaky checkout test" --repo acme/web --model sonnet --follow
-noemune run "Add dark mode" --conductor --repo acme/api --repo acme/web --workstream "Dark mode"
-noemune workflow ship-feature -i feature="CSV export" --follow
-noemune ls
-noemune logs -f 3ff6c49b
-noemune send 3ff6c49b "Also update the changelog" --follow
-noemune stop 3ff6c49b
+hyperbeam login --server https://hyperbeam.example.com
+hyperbeam run "Fix the flaky checkout test" --repo acme/web --model sonnet --follow
+hyperbeam run "Add dark mode" --conductor --repo acme/api --repo acme/web --workstream "Dark mode"
+hyperbeam workflow ship-feature -i feature="CSV export" --follow
+hyperbeam ls
+hyperbeam logs -f 3ff6c49b
+hyperbeam send 3ff6c49b "Also update the changelog" --follow
+hyperbeam stop 3ff6c49b
 ```
 
-`NOEMUNE_SERVER` and `NOEMUNE_API_KEY` in the environment take the place of `noemune login`.
+`HYPERBEAM_SERVER` and `HYPERBEAM_API_KEY` in the environment take the place of `hyperbeam login`.
 
 ## Configuration
 
-`noemune-server serve --help` lists every option. The ones that matter most:
+`hyperbeam-server serve --help` lists every option. The ones that matter most:
 
 | Variable | Meaning |
 |---|---|
-| `NOEMUNE_DATABASE_URL` | Postgres connection URL |
-| `NOEMUNE_MASTER_KEY` | 32 random bytes, base64; encrypts stored credentials |
-| `NOEMUNE_PUBLIC_URL` | where people reach the UI |
-| `NOEMUNE_INTERNAL_URL` | where sandboxes reach the server |
-| `NOEMUNE_SANDBOX_DRIVER` | `process` (development) or `kubernetes` |
-| `NOEMUNE_EGRESS_LISTEN` / `NOEMUNE_EGRESS_ADDR` | enable the egress proxy and tell sandboxes where it is |
-| `NOEMUNE_EGRESS_ALLOW` | hosts every sandbox may reach |
-| `NOEMUNE_IDLE_TIMEOUT_SECS`, `NOEMUNE_MAX_SESSIONS` | sandbox lifetime and concurrency |
+| `HYPERBEAM_DATABASE_URL` | Postgres connection URL |
+| `HYPERBEAM_MASTER_KEY` | 32 random bytes, base64; encrypts stored credentials |
+| `HYPERBEAM_PUBLIC_URL` | where people reach the UI |
+| `HYPERBEAM_INTERNAL_URL` | where sandboxes reach the server |
+| `HYPERBEAM_SANDBOX_DRIVER` | `process` (development) or `kubernetes` |
+| `HYPERBEAM_EGRESS_LISTEN` / `HYPERBEAM_EGRESS_ADDR` | enable the egress proxy and tell sandboxes where it is |
+| `HYPERBEAM_EGRESS_ALLOW` | hosts every sandbox may reach |
+| `HYPERBEAM_IDLE_TIMEOUT_SECS`, `HYPERBEAM_MAX_SESSIONS` | sandbox lifetime and concurrency |
 
 ### Adding a harness
 
@@ -230,14 +232,14 @@ toolchains to it so agents can build and test your code.
 ## Development
 
 ```sh
-cargo build -p noemune-runner -p noemune-test-agent
-NOEMUNE_TEST_DATABASE_URL=postgres://noemune:noemune@127.0.0.1:5440/postgres cargo test --workspace
+cargo build -p hyperbeam-runner -p hyperbeam-test-agent
+HYPERBEAM_TEST_DATABASE_URL=postgres://hyperbeam:hyperbeam@127.0.0.1:5440/postgres cargo test --workspace
 (cd web && bun run typecheck && bun run build)
 ```
 
 The end-to-end tests start a real server, real runner processes driving a scripted ACP agent
 (`crates/test-agent`, not shipped), and a fake GitHub that serves the git
-smart-HTTP protocol, and need Postgres; without `NOEMUNE_TEST_DATABASE_URL` they are skipped.
+smart-HTTP protocol, and need Postgres; without `HYPERBEAM_TEST_DATABASE_URL` they are skipped.
 
 | Path | Contents |
 |---|---|
@@ -245,7 +247,7 @@ smart-HTTP protocol, and need Postgres; without `NOEMUNE_TEST_DATABASE_URL` they
 | `crates/server` | API, session manager, tool gateway, git proxy, egress proxy, sandbox drivers |
 | `crates/runner` | in-sandbox runner; ACP client |
 | `crates/test-agent` | scripted ACP agent for the end-to-end tests (not shipped) |
-| `crates/cli` | the `noemune` command |
+| `crates/cli` | the `hyperbeam` command |
 | `web` | the UI (React, built with Bun) |
 | `site` | the landing page, rendered to static HTML (`bun run dev` in `site/`) |
 | `docs` | the documentation: Markdown in `docs/content/`, rendered to static HTML |

@@ -1,5 +1,5 @@
 [package]
-name = "noemune-test-agent"
+name = "hyperbeam-test-agent"
 description = "A scripted ACP agent with no model, used by the end-to-end tests"
 version.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 publish = false
 
 [[bin]]
-name = "noemune-test-agent"
+name = "hyperbeam-test-agent"
 path = "src/main.rs"
 
 [dependencies]

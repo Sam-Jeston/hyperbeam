@@ -2,11 +2,11 @@
 //! driving a scripted test agent, and a fake GitHub (REST API plus a genuine git
 //! smart-HTTP backend) standing in for the outside world.
 //!
-//! Needs Postgres. Set `NOEMUNE_TEST_DATABASE_URL` to a server-level URL
+//! Needs Postgres. Set `HYPERBEAM_TEST_DATABASE_URL` to a server-level URL
 //! whose user may create databases, e.g.
-//! `postgres://noemune:noemune@127.0.0.1:5440/postgres`. Without it the
+//! `postgres://hyperbeam:hyperbeam@127.0.0.1:5440/postgres`. Without it the
 //! tests are skipped. Build the runner and the test agent first:
-//! `cargo build -p noemune-runner -p noemune-test-agent`.
+//! `cargo build -p hyperbeam-runner -p hyperbeam-test-agent`.
 
 use axum::Router;
 use axum::body::Bytes;
@@ -16,7 +16,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post, put};
 use base64::Engine;
 use clap::Parser;
-use noemune_server::config::Config;
+use hyperbeam_server::config::Config;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -138,7 +138,7 @@ async fn git_backend(
         .env("QUERY_STRING", query.unwrap_or_default())
         .env("CONTENT_TYPE", headers.get("content-type").and_then(|v| v.to_str().ok()).unwrap_or_default())
         .env("CONTENT_LENGTH", body.len().to_string())
-        .env("REMOTE_USER", "noemune")
+        .env("REMOTE_USER", "hyperbeam")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -234,8 +234,8 @@ fn token_from(response: &reqwest::Response) -> String {
 
 impl Harness {
     async fn start() -> Option<Harness> {
-        let Ok(admin_url) = std::env::var("NOEMUNE_TEST_DATABASE_URL") else {
-            eprintln!("skipping: NOEMUNE_TEST_DATABASE_URL is not set");
+        let Ok(admin_url) = std::env::var("HYPERBEAM_TEST_DATABASE_URL") else {
+            eprintln!("skipping: HYPERBEAM_TEST_DATABASE_URL is not set");
             return None;
         };
         let db_name = format!("nm_test_{}", uuid::Uuid::new_v4().simple());
@@ -252,10 +252,10 @@ impl Harness {
         tokio::spawn(axum::serve(gh_listener, github.clone().router()).into_future());
 
         let bin_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-        let runner = bin_dir.join("noemune-runner");
-        let agent = bin_dir.join("noemune-test-agent");
+        let runner = bin_dir.join("hyperbeam-runner");
+        let agent = bin_dir.join("hyperbeam-test-agent");
         for bin in [&runner, &agent] {
-            assert!(bin.exists(), "build the binaries first: cargo build -p noemune-runner -p noemune-test-agent");
+            assert!(bin.exists(), "build the binaries first: cargo build -p hyperbeam-runner -p hyperbeam-test-agent");
         }
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -265,7 +265,7 @@ impl Harness {
         let cfg = ConfigArgs::parse_from([
             "test",
             "--database-url", db_url.as_str(),
-            "--master-key", &noemune_server::crypto::SecretBox::generate_key(),
+            "--master-key", &hyperbeam_server::crypto::SecretBox::generate_key(),
             "--internal-url", &base,
             "--public-url", &base,
             "--sandbox-driver", "process",
@@ -277,8 +277,8 @@ impl Harness {
             "--egress-allow", "allowed.invalid",
         ])
         .cfg;
-        let (app, router) = noemune_server::build(cfg).await.expect("server builds");
-        tokio::spawn(noemune_server::egress::run(app, egress_listener));
+        let (app, router) = hyperbeam_server::build(cfg).await.expect("server builds");
+        tokio::spawn(hyperbeam_server::egress::run(app, egress_listener));
         tokio::spawn(axum::serve(listener, router).into_future());
         Some(Harness { base, http: reqwest::Client::new(), github, agent, _tmp: tmp })
     }
@@ -361,13 +361,13 @@ async fn agent_works_within_its_owners_permissions() {
 !mcp github_create_pull_request {"title": "Add greeting", "body": "Adds greeting.txt"}
 !sh cd demo && git push origin HEAD:main 2>&1; echo "exit=$?"
 !mcp github_merge_pull_request {"number": 7}
-!mcp noemune_memory_write {"key": "demo-notes", "content": "The demo repo has a greeting."}
+!mcp hyperbeam_memory_write {"key": "demo-notes", "content": "The demo repo has a greeting."}
 !say All done: opened a pull request."#;
     let created = mia.post("/sessions", json!({ "prompt": prompt, "harness": "scripted", "repos": ["acme/demo"], "new_workstream": "Greeting file" })).await;
     let session = &created["session"];
     let id = session["id"].as_str().unwrap();
     let branch = session["work_branch"].as_str().unwrap().to_string();
-    assert!(branch.starts_with("noemune/add-a-greeting-file-"), "{branch}");
+    assert!(branch.starts_with("hyperbeam/add-a-greeting-file-"), "{branch}");
     assert_eq!(session["grants"], json!(["github:read", "github:write", "github:open_pr"]));
 
     let events = mia.wait_turns(id, 1).await;
@@ -440,17 +440,17 @@ async fn conductor_delegates_and_hears_back() {
     let Some(h) = Harness::start().await else { return };
     let owner = h.owner().await;
     let prompt = r#"Ship the thing.
-!mcp noemune_spawn_agent {"title": "Build part A", "prompt": "!say Part A is built."}
+!mcp hyperbeam_spawn_agent {"title": "Build part A", "prompt": "!say Part A is built."}
 !say Delegated part A."#;
     let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "scripted", "role": "conductor" })).await;
     let id = created["session"]["id"].as_str().unwrap();
 
     // Turn 1: delegate. Turn 2: prompted by the platform when the worker reports.
     let events = owner.wait_turns(id, 2).await;
-    assert!(tool_output(&events, "noemune_spawn_agent").contains("Started worker agent"));
+    assert!(tool_output(&events, "hyperbeam_spawn_agent").contains("Started worker agent"));
     let report = events
         .iter()
-        .filter(|e| e["kind"] == "user_message" && e["data"]["author"] == "Noemune")
+        .filter(|e| e["kind"] == "user_message" && e["data"]["author"] == "Hyperbeam")
         .filter_map(|e| e["data"]["text"].as_str())
         .next()
         .expect("conductor was told its worker finished");
@@ -464,9 +464,9 @@ async fn conductor_delegates_and_hears_back() {
 
     // A worker cannot manage agents.
     let child_id = child["id"].as_str().unwrap();
-    owner.post(&format!("/sessions/{child_id}/messages"), json!({ "text": "!mcp noemune_spawn_agent {\"title\": \"x\", \"prompt\": \"y\"}" })).await;
+    owner.post(&format!("/sessions/{child_id}/messages"), json!({ "text": "!mcp hyperbeam_spawn_agent {\"title\": \"x\", \"prompt\": \"y\"}" })).await;
     let events = owner.wait_turns(child_id, 2).await;
-    assert!(tool_output(&events, "noemune_spawn_agent").contains("Denied"));
+    assert!(tool_output(&events, "hyperbeam_spawn_agent").contains("Denied"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -569,7 +569,7 @@ async fn model_is_chosen_per_session_with_harness_defaults() {
     // A conductor's worker inherits the conductor's model unless told otherwise.
     let id = start(json!({
         "harness": "scripted", "role": "conductor", "model": "mock-small",
-        "prompt": "!mcp noemune_spawn_agent {\"title\": \"inherits\", \"prompt\": \"!model\"}\n!mcp noemune_spawn_agent {\"title\": \"overrides\", \"prompt\": \"!model\", \"model\": \"mock-large\"}",
+        "prompt": "!mcp hyperbeam_spawn_agent {\"title\": \"inherits\", \"prompt\": \"!model\"}\n!mcp hyperbeam_spawn_agent {\"title\": \"overrides\", \"prompt\": \"!model\", \"model\": \"mock-large\"}",
     }))
     .await;
     owner.wait_turns(&id, 3).await;

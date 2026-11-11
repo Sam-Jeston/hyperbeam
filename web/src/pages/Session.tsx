@@ -403,12 +403,12 @@ function TranscriptItem({ item }: { item: Item }) {
   const users = useStore((s) => s.users);
   switch (item.type) {
     case "user": {
-      if (!item.userId && item.author === "Noemune") {
+      if (!item.userId && item.author === "Hyperbeam") {
         return (
           <div className="flex gap-3 rounded-lg border border-border bg-surface-2/50 px-3.5 py-2.5 text-[13px]">
             <BrandMark size={18} className="mt-0.5" />
             <div className="min-w-0 flex-1">
-              <div className="mb-0.5 text-[12px] text-muted">Noemune · {clock(item.ts)}</div>
+              <div className="mb-0.5 text-[12px] text-muted">Hyperbeam · {clock(item.ts)}</div>
               <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{item.text}</div>
             </div>
           </div>

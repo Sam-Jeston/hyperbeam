@@ -17,8 +17,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
-use noemune_core::Grant;
-use noemune_core::protocol::event;
+use hyperbeam_core::Grant;
+use hyperbeam_core::protocol::event;
 use serde_json::{Value, json};
 
 pub enum ToolError {
@@ -208,8 +208,8 @@ pub async fn handle(State(app): State<App>, parts: Parts, Json(request): Json<Va
                 json!({
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false } },
-                    "serverInfo": { "name": "noemune", "title": "Noemune", "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": "Tools for acting on GitHub, Linear, Notion and the Noemune platform. \
+                    "serverInfo": { "name": "hyperbeam", "title": "Hyperbeam", "version": env!("CARGO_PKG_VERSION") },
+                    "instructions": "Tools for acting on GitHub, Linear, Notion and the Hyperbeam platform. \
                                      Calls are checked against this session's permissions and are visible to the team.",
                 }),
             )
@@ -239,7 +239,7 @@ pub async fn handle(State(app): State<App>, parts: Parts, Json(request): Json<Va
                 Err(ToolError::Failed(why)) => (format!("Error: {why}"), aimed_at, true, true),
             };
             // Reads of the platform's own state are not worth a log line each.
-            let quiet = matches!(name.as_str(), "noemune_memory_list" | "noemune_memory_read" | "noemune_list_agents" | "noemune_get_agent") && !failed;
+            let quiet = matches!(name.as_str(), "hyperbeam_memory_list" | "hyperbeam_memory_read" | "hyperbeam_list_agents" | "hyperbeam_get_agent") && !failed;
             let detail = if failed { text.chars().take(500).collect::<String>() } else { String::new() };
             store::record_audit(&app.db, &session, &name, &target, allowed, &detail).await.ok();
             if !quiet {

@@ -3,7 +3,7 @@
 use crate::crypto::SecretBox;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use noemune_core::{GrantSet, RepoScope, Role};
+use hyperbeam_core::{GrantSet, RepoScope, Role};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -313,7 +313,7 @@ pub async fn seed_harnesses(db: &PgPool) -> sqlx::Result<()> {
             "claude-code",
             "Claude Code",
             "Anthropic's coding agent, via the Agent Client Protocol adapter.",
-            "ghcr.io/noemune/harness-claude-code:latest",
+            "ghcr.io/hyperbeam/harness-claude-code:latest",
             serde_json::json!(["claude-agent-acp"]),
             serde_json::json!([
                 slot("ANTHROPIC_API_KEY", "Anthropic API key", "api_key"),
@@ -326,7 +326,7 @@ pub async fn seed_harnesses(db: &PgPool) -> sqlx::Result<()> {
             "codex",
             "Codex",
             "OpenAI's coding agent, via the Agent Client Protocol adapter.",
-            "ghcr.io/noemune/harness-codex:latest",
+            "ghcr.io/hyperbeam/harness-codex:latest",
             serde_json::json!(["codex-acp"]),
             serde_json::json!([slot("OPENAI_API_KEY", "OpenAI API key", "api_key")]),
             serde_json::json!(["api.openai.com", "*.openai.com", "chatgpt.com"]),
@@ -336,7 +336,7 @@ pub async fn seed_harnesses(db: &PgPool) -> sqlx::Result<()> {
             "gemini",
             "Gemini CLI",
             "Google's coding agent; speaks the Agent Client Protocol natively.",
-            "ghcr.io/noemune/harness-gemini:latest",
+            "ghcr.io/hyperbeam/harness-gemini:latest",
             serde_json::json!(["gemini", "--acp"]),
             serde_json::json!([slot("GEMINI_API_KEY", "Gemini API key", "api_key")]),
             serde_json::json!(["generativelanguage.googleapis.com", "*.googleapis.com"]),
@@ -346,7 +346,7 @@ pub async fn seed_harnesses(db: &PgPool) -> sqlx::Result<()> {
             "opencode",
             "OpenCode",
             "Open-source coding agent; speaks the Agent Client Protocol natively.",
-            "ghcr.io/noemune/harness-opencode:latest",
+            "ghcr.io/hyperbeam/harness-opencode:latest",
             serde_json::json!(["opencode", "acp"]),
             serde_json::json!([
                 slot("ANTHROPIC_API_KEY", "Anthropic API key", "api_key"),

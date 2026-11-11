@@ -8,21 +8,21 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "noemune-runner", version, about = "Noemune in-sandbox runner")]
+#[command(name = "hyperbeam-runner", version, about = "Hyperbeam in-sandbox runner")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
 
     /// Control plane base URL.
-    #[arg(long, env = "NOEMUNE_SERVER_URL", global = true)]
+    #[arg(long, env = "HYPERBEAM_SERVER_URL", global = true)]
     server_url: Option<String>,
 
     /// Per-session credential issued by the control plane.
-    #[arg(long, env = "NOEMUNE_RUN_TOKEN", global = true, hide_env_values = true)]
+    #[arg(long, env = "HYPERBEAM_RUN_TOKEN", global = true, hide_env_values = true)]
     run_token: Option<String>,
 
     /// Directory repositories are checked out into.
-    #[arg(long, env = "NOEMUNE_WORKSPACE", default_value = "/workspace", global = true)]
+    #[arg(long, env = "HYPERBEAM_WORKSPACE", default_value = "/workspace", global = true)]
     workspace: PathBuf,
 }
 
@@ -32,9 +32,9 @@ enum Command {
     Run,
     /// Copy this binary to DEST (used by the Kubernetes init container).
     Install { dest: PathBuf },
-    /// Bridge a stdio MCP client to the Noemune tool gateway.
+    /// Bridge a stdio MCP client to the Hyperbeam tool gateway.
     McpBridge {
-        #[arg(long, env = "NOEMUNE_MCP_URL")]
+        #[arg(long, env = "HYPERBEAM_MCP_URL")]
         mcp_url: String,
     },
 }
@@ -64,13 +64,13 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::McpBridge { mcp_url } => {
-            let token = cli.run_token.ok_or_else(|| anyhow::anyhow!("NOEMUNE_RUN_TOKEN is required"))?;
+            let token = cli.run_token.ok_or_else(|| anyhow::anyhow!("HYPERBEAM_RUN_TOKEN is required"))?;
             bridge::run(mcp_url, token).await
         }
         Command::Run => {
             let cfg = session::Config {
-                server_url: cli.server_url.ok_or_else(|| anyhow::anyhow!("NOEMUNE_SERVER_URL is required"))?,
-                token: cli.run_token.ok_or_else(|| anyhow::anyhow!("NOEMUNE_RUN_TOKEN is required"))?,
+                server_url: cli.server_url.ok_or_else(|| anyhow::anyhow!("HYPERBEAM_SERVER_URL is required"))?,
+                token: cli.run_token.ok_or_else(|| anyhow::anyhow!("HYPERBEAM_RUN_TOKEN is required"))?,
                 workspace: cli.workspace,
             };
             session::run(cfg).await

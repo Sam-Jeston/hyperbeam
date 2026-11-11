@@ -1,17 +1,17 @@
 [package]
-name = "noemune-cli"
-description = "Command-line client for a Noemune server"
+name = "hyperbeam-cli"
+description = "Command-line client for a Hyperbeam server"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "noemune"
+name = "hyperbeam"
 path = "src/main.rs"
 
 [dependencies]
-noemune-core.workspace = true
+hyperbeam-core.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

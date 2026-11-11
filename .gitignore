@@ -3,6 +3,6 @@ node_modules
 /web/dist
 .env
 *.pem
-.noemune-dev
+.hyperbeam-dev
 /site/dist
 /docs/dist

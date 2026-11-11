@@ -10,11 +10,13 @@
 
 @layer components {
   /* Agar: a faint dot field, the texture of the dish. */
-  .agar {
+  .dot-grid {
     background-image: radial-gradient(color-mix(in srgb, var(--foreground) 9%, transparent) 1px, transparent 1.2px);
     background-size: 22px 22px;
     mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, black 30%, transparent 75%);
   }
+  /* Full colour, slightly held back so the headline stays the first read. */
+  .hero-beam { opacity: 0.9; filter: drop-shadow(0 0 48px color-mix(in srgb, var(--primary) 35%, transparent)); }
   .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--primary); }
 
   /* Highlighted code from Shiki. */

@@ -256,7 +256,7 @@ function App() {
     return (
       <Splash>
         <div className="grid gap-1">
-          <h1 className="font-display text-xl font-semibold">Can’t reach Noemune</h1>
+          <h1 className="font-display text-xl font-semibold">Can’t reach Hyperbeam</h1>
           <p className="max-w-[46ch] text-muted">{bootError}</p>
         </div>
         <Button variant="primary" onClick={() => window.location.reload()}>Try again</Button>

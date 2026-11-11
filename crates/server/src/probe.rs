@@ -18,7 +18,7 @@ use crate::store::{self, ModelChoice};
 use anyhow::{Context, Result, anyhow};
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
-use noemune_core::protocol::{HarnessSpec, PROTOCOL_VERSION, RunSpec, RunnerMsg, ServerMsg};
+use hyperbeam_core::protocol::{HarnessSpec, PROTOCOL_VERSION, RunSpec, RunnerMsg, ServerMsg};
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;

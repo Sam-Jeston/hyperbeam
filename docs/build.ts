@@ -93,11 +93,11 @@ ${body}
   await write(
     "index.html",
     document(
-      "Noemune docs",
-      "Documentation for Noemune, the self-hosted platform where a team’s coding agents work in the open.",
+      "Hyperbeam docs",
+      "Documentation for Hyperbeam, the self-hosted platform where a team’s coding agents work in the open.",
       renderToStaticMarkup(
         DocPage({
-          meta: { slug: "", title: "Noemune documentation", description: "Everything you need to run your team’s coding agents in the open: try it locally, learn how it fits together, and install it for your team." },
+          meta: { slug: "", title: "Hyperbeam documentation", description: "Everything you need to run your team’s coding agents in the open: try it locally, learn how it fits together, and install it for your team." },
           headings: [],
           titles,
           next: metas[ORDER[0]],
@@ -123,14 +123,14 @@ ${body}
         editPath: `${slug}.md`,
       }),
     );
-    await write(`${slug}/index.html`, document(`${page.title} · Noemune docs`, page.description, html));
+    await write(`${slug}/index.html`, document(`${page.title} · Hyperbeam docs`, page.description, html));
     await write(`${slug}.md`, `# ${page.title}\n\n${page.description ? `> ${page.description}\n\n` : ""}${page.body}`);
   }
 
   // Not found.
   await write(
     "404.html",
-    document("Not found · Noemune docs", "", renderToStaticMarkup(
+    document("Not found · Hyperbeam docs", "", renderToStaticMarkup(
       DocPage({
         meta: { slug: "404", title: "This page isn’t here", description: "It may have moved. Search the docs, or start from the overview." },
         headings: [],
@@ -147,7 +147,7 @@ ${body}
     JSON.stringify(ORDER.map((slug: string) => ({ slug, title: pages[slug].title, description: pages[slug].description, group: groupOf(slug), sections: pages[slug].sections }))),
   );
   const llms = [
-    "# Noemune",
+    "# Hyperbeam",
     "",
     "> A self-hosted platform where a team's coding agents work in the open.",
     "",

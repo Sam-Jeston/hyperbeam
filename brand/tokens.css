@@ -1,4 +1,4 @@
-/* Noemune brand tokens: "Culture". Shared by web/, site/ and docs/.
+/* Hyperbeam brand tokens. Shared by web/, site/ and docs/.
    Import after `@import "tailwindcss";`. Dark is the default; `.light` on <html> opts out.
    Components use only the Tailwind names mapped in @theme. See brand/README.md. */
 /* Self-hosted variable fonts, Latin subsets only (the UI copy is English).
@@ -54,7 +54,7 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Dark: agar under a dim lamp. */
+/* Dark: the default. */
 :root {
   --background: #0f1411;
   --surface: #161d19;
@@ -71,6 +71,8 @@
   --accent: #2a1d36;
   --accent-foreground: #d9bdf3;
   --second: #ee7c9c;
+  --glow: #d9bdf3;
+  --core: #fbf7ff;
   --ring: #b98ae0;
   --run: #5bd49a;
   --wait: #e8b65a;
@@ -93,7 +95,7 @@
   color-scheme: dark;
 }
 
-/* Light: the same dish on a bench. */
+/* Light: a full counterpart, not an inversion. */
 :root.light {
   --background: #f2f4f1;
   --surface: #ffffff;
@@ -110,6 +112,8 @@
   --accent: #efe6f5;
   --accent-foreground: #5a2379;
   --second: #c2365f;
+  --glow: #b98ae0;
+  --core: #fff4f7;
   --ring: #6b2c91;
   --run: #1e7f55;
   --wait: #a86a12;
@@ -146,6 +150,8 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-second: var(--second);
+  --color-glow: var(--glow);
+  --color-core: var(--core);
   --color-ring: var(--ring);
   --color-run: var(--run);
   --color-wait: var(--wait);

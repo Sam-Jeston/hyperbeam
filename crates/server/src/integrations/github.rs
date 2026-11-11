@@ -74,7 +74,7 @@ impl App {
 
         let installation = gh(Method::GET, format!("{api}/repos/{repo}/installation")).send().await?;
         if !installation.status().is_success() {
-            bail!("the Noemune GitHub App is not installed on {repo} (GitHub said {})", installation.status());
+            bail!("the Hyperbeam GitHub App is not installed on {repo} (GitHub said {})", installation.status());
         }
         let installation: Value = installation.json().await?;
         let installation_id = installation.get("id").and_then(Value::as_i64).ok_or_else(|| anyhow!("unexpected reply from GitHub"))?;

@@ -5,7 +5,7 @@ description: From a fresh installation to a team that can start agents, in five 
 
 The first person to open a new installation creates the team and becomes its **owner**. Then:
 
-1. **Connect GitHub** under **Settings → Integrations**. Use a GitHub App for an organisation: Noemune then mints a short-lived token per repository per request. A fine-grained access token works for one person. See [Integrations](/integrations).
+1. **Connect GitHub** under **Settings → Integrations**. Use a GitHub App for an organisation: Hyperbeam then mints a short-lived token per repository per request. A fine-grained access token works for one person. See [Integrations](/integrations).
 2. **Register repositories** under **Settings → Repositories**, as `owner/name`. Agents can reach only these.
 3. **Give a harness a credential** under **Settings → Harnesses**: a team API key, or each person’s own. See [Credentials](/credentials).
 4. **Invite people** from **People & permissions**, and tick what each person’s agents may do. See [People and permissions](/permissions).
@@ -15,7 +15,7 @@ The first person to open a new installation creates the team and becomes its **o
 
 Select **Invite someone**, enter their email, choose a role and what their agents may do, and select **Create invite link**.
 
-Noemune does not send email: copy the link and pass it on yourself. A link works once and expires after seven days. Pending invites are listed on **People & permissions**, where you can revoke them.
+Hyperbeam does not send email: copy the link and pass it on yourself. A link works once and expires after seven days. Pending invites are listed on **People & permissions**, where you can revoke them.
 
 ## General settings
 

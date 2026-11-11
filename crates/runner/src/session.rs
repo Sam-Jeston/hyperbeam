@@ -5,7 +5,7 @@ use crate::acp::{self, AcpClient, Incoming};
 use crate::conn::{self, Link};
 use crate::workspace;
 use anyhow::{Context, Result, anyhow, bail};
-use noemune_core::protocol::{RunSpec, RunnerMsg, ServerMsg, event};
+use hyperbeam_core::protocol::{RunSpec, RunnerMsg, ServerMsg, event};
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -123,8 +123,8 @@ async fn drive(cfg: &Config, spec: &RunSpec, link: &mut Link) -> Result<()> {
 
     let mut env = spec.harness.env.clone();
     env.extend(git_env);
-    env.insert("NOEMUNE_SESSION_ID".into(), spec.session_id.to_string());
-    env.insert("NOEMUNE_MCP_URL".into(), spec.mcp_url.clone());
+    env.insert("HYPERBEAM_SESSION_ID".into(), spec.session_id.to_string());
+    env.insert("HYPERBEAM_MCP_URL".into(), spec.mcp_url.clone());
 
     // `{runner}` lets a profile launch this binary's built-in agents.
     let exe = std::env::current_exe().context("cannot locate the runner binary")?;
@@ -275,7 +275,7 @@ async fn handshake(
             json!({
                 "protocolVersion": 1,
                 "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false }, "terminal": false },
-                "clientInfo": { "name": "noemune", "title": "Noemune", "version": env!("CARGO_PKG_VERSION") },
+                "clientInfo": { "name": "hyperbeam", "title": "Hyperbeam", "version": env!("CARGO_PKG_VERSION") },
             }),
         )
         .await?;
@@ -290,7 +290,7 @@ async fn handshake(
     } else if http_mcp {
         json!([{
             "type": "http",
-            "name": "noemune",
+            "name": "hyperbeam",
             "url": spec.mcp_url,
             "headers": [{ "name": "Authorization", "value": format!("Bearer {token}") }],
         }])
@@ -298,12 +298,12 @@ async fn handshake(
         // Every ACP agent must support stdio servers; bridge to the gateway.
         let exe = std::env::current_exe().context("cannot locate the runner binary")?;
         json!([{
-            "name": "noemune",
+            "name": "hyperbeam",
             "command": exe,
             "args": ["mcp-bridge"],
             "env": [
-                { "name": "NOEMUNE_MCP_URL", "value": spec.mcp_url },
-                { "name": "NOEMUNE_RUN_TOKEN", "value": token },
+                { "name": "HYPERBEAM_MCP_URL", "value": spec.mcp_url },
+                { "name": "HYPERBEAM_RUN_TOKEN", "value": token },
             ],
         }])
     };

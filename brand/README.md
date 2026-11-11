@@ -1,7 +1,8 @@
-# Noemune brand: Culture
+# Hyperbeam brand
 
-Every agent works in its own sealed dish, and the team watches what it does. The UI should feel like a
-calm, well-lit lab: precise and observant, but approachable for people who never open a terminal.
+*Because it’s the best move.* The name is a playground argument from the 90s; the product is not a joke.
+The mark carries the fun, a little pixel-art beam. Everything else stays calm and precise: the UI should be
+observant and dependable, and approachable for people who never open a terminal.
 
 Read this before changing anything visual. It applies to all three web properties:
 
@@ -9,6 +10,7 @@ Read this before changing anything visual. It applies to all three web propertie
 |---|---|---|
 | `brand/tokens.css` | colors (both themes), fonts, radii, shadows, motion. The only place colors are defined | imported by each app's CSS |
 | `brand/build.ts` | font copying, theme-before-paint script, favicon | each app's `build.ts` |
+| `brand/mark.ts` | the mark's pixel paths and the favicon | `BrandMark` in each app, `brand/build.ts` |
 | `web/` | the product (embedded in the server) | React, Radix, Tailwind; kit in `web/src/components/ui/` |
 | `site/` | the public landing page | React rendered to static HTML at build time, Tailwind |
 | `docs/` | the documentation | Markdown in `docs/content/`, rendered to static HTML, Tailwind |
@@ -17,9 +19,14 @@ In `web/`, app-level pieces (status, avatars, page layout) live in `web/src/lib/
 
 ## Mark
 
-`<BrandMark />` (`web/src/components/ui/brand.tsx`; the same SVG is in `site/` and `docs/`): a ring (the sandbox) holding a violet nucleus (the agent)
-and two pink helpers. The wordmark is lowercase **noemune** in Bricolage Grotesque Bold, tracked tight.
-Keep the mark in the theme colors; never recolor it to a status color.
+`<BrandMark />` (`web/src/components/ui/brand.tsx`, and a copy of the component in `site/` and `docs/`; all three
+draw the paths in `brand/mark.ts`): a 16×16 pixel beam fired corner to corner from a charged orb, in four layers:
+`primary` edge, `second` body, `glow` sparks and a `core` that is white-hot in both themes. Keep it pixel-exact:
+`shape-rendering: crispEdges`, sizes that are multiples of 16 where you can (16, 32, 48), and never smoothed,
+outlined or recolored to a status color. The landing page hero uses the same paths scaled up, faded behind the headline.
+
+The wordmark is lowercase **hyperbeam** in Bricolage Grotesque Bold, tracked tight. The tagline,
+*Because it’s the best move.*, sits under it in `primary` on the landing page and in the README. Use it sparingly.
 
 ## Color
 
@@ -31,9 +38,9 @@ Use the Tailwind names below, never hex values or Tailwind's built-in palette.
 | `background` / `surface` / `surface-2` / `elevated` | page, cards, wells and hover, popovers and dialogs |
 | `border` / `border-strong` | dividers / control outlines |
 | `foreground` / `muted` / `faint` | text, secondary text, tertiary text and icons |
-| `primary` (crystal violet) | the one primary action per view, selection, focus rings, links |
+| `primary` (violet) | the one primary action per view, selection, focus rings, links |
 | `accent` / `accent-foreground` | soft violet fill: active nav, selected choices, the user's own messages |
-| `second` (safranin) | the mark only |
+| `second` (pink) / `glow` / `core` | the mark only |
 | `run` / `wait` / `idle` / `fail` | session state, and only that (plus success/warning/error notices) |
 
 Session state always maps the same way: running → `run`, queued/starting → `wait`, waiting for input →

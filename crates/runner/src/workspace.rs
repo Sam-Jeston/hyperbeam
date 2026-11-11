@@ -2,7 +2,7 @@
 //! git proxy and lay down skills where harnesses look for them.
 
 use anyhow::{Context, Result, bail};
-use noemune_core::protocol::{RepoSpec, RunSpec, SkillSpec};
+use hyperbeam_core::protocol::{RepoSpec, RunSpec, SkillSpec};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;

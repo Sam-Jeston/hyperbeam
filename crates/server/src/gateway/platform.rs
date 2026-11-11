@@ -6,8 +6,8 @@ use crate::app::App;
 use crate::error::ApiError;
 use crate::sessions::NewSession;
 use crate::store::{self, Link, Session};
-use noemune_core::protocol::SessionStatus;
-use noemune_core::workflow::SessionRole;
+use hyperbeam_core::protocol::SessionStatus;
+use hyperbeam_core::workflow::SessionRole;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -16,16 +16,16 @@ const MAX_MEMORY_BYTES: usize = 64 * 1024;
 pub fn tools() -> Vec<ToolDef> {
     let tool = |name, description, schema, conductor_only| ToolDef { name, description, schema, grant: None, conductor_only };
     vec![
-        tool("noemune_memory_list", "List the team's shared notes: durable knowledge kept across sessions.", schema(&[]), false),
-        tool("noemune_memory_read", "Read one shared note.", schema(&[("key", "string", "Note key", true)]), false),
+        tool("hyperbeam_memory_list", "List the team's shared notes: durable knowledge kept across sessions.", schema(&[]), false),
+        tool("hyperbeam_memory_read", "Read one shared note.", schema(&[("key", "string", "Note key", true)]), false),
         tool(
-            "noemune_memory_write",
+            "hyperbeam_memory_write",
             "Create or replace a shared note. Use for durable facts future sessions will need (conventions, decisions, how to run things), not for progress updates.",
             schema(&[("key", "string", "Short kebab-case key, e.g. api-testing", true), ("content", "string", "The note (markdown)", true)]),
             false,
         ),
         tool(
-            "noemune_update_workstream",
+            "hyperbeam_update_workstream",
             "Update the workstream this session belongs to: move it between stages or attach a link the team should see.",
             schema(&[
                 ("status", "string", "scoping, building, review or done", false),
@@ -35,7 +35,7 @@ pub fn tools() -> Vec<ToolDef> {
             false,
         ),
         tool(
-            "noemune_spawn_agent",
+            "hyperbeam_spawn_agent",
             "Start a worker agent in its own sandbox. It does not see this conversation: the prompt must be a complete brief.",
             schema(&[
                 ("title", "string", "Short name for the piece of work", true),
@@ -47,15 +47,15 @@ pub fn tools() -> Vec<ToolDef> {
             ]),
             true,
         ),
-        tool("noemune_list_agents", "List the worker agents this conductor has started, with status.", schema(&[]), true),
-        tool("noemune_get_agent", "Status, latest report and links for one worker agent.", schema(&[("id", "string", "Agent session id", true)]), true),
+        tool("hyperbeam_list_agents", "List the worker agents this conductor has started, with status.", schema(&[]), true),
+        tool("hyperbeam_get_agent", "Status, latest report and links for one worker agent.", schema(&[("id", "string", "Agent session id", true)]), true),
         tool(
-            "noemune_message_agent",
+            "hyperbeam_message_agent",
             "Send a follow-up prompt to a worker agent. A finished agent is resumed.",
             schema(&[("id", "string", "Agent session id", true), ("text", "string", "The message", true)]),
             true,
         ),
-        tool("noemune_stop_agent", "Stop a worker agent and tear down its sandbox.", schema(&[("id", "string", "Agent session id", true)]), true),
+        tool("hyperbeam_stop_agent", "Stop a worker agent and tear down its sandbox.", schema(&[("id", "string", "Agent session id", true)]), true),
     ]
 }
 
@@ -96,7 +96,7 @@ fn describe(agent: &Session) -> String {
 
 pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> ToolResult {
     match name {
-        "noemune_memory_list" => {
+        "hyperbeam_memory_list" => {
             let rows: Vec<(String, i32)> = sqlx::query_as("SELECT key, length(content) FROM memory ORDER BY key").fetch_all(&app.db).await?;
             let text = if rows.is_empty() {
                 "No shared notes yet.".to_string()
@@ -105,7 +105,7 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             };
             Ok(ToolOutput::new("", text))
         }
-        "noemune_memory_read" => {
+        "hyperbeam_memory_read" => {
             let key = arg_str(args, "key")?;
             let row: Option<(String,)> = sqlx::query_as("SELECT content FROM memory WHERE key = $1").bind(key).fetch_optional(&app.db).await?;
             match row {
@@ -113,10 +113,10 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
                 None => Err(ToolError::Failed(format!("no note named `{key}`"))),
             }
         }
-        "noemune_memory_write" => {
+        "hyperbeam_memory_write" => {
             let key = arg_str(args, "key")?;
             let content = arg_str(args, "content")?;
-            if !noemune_core::workflow::valid_slug(key) {
+            if !hyperbeam_core::workflow::valid_slug(key) {
                 return Err(ToolError::Failed("key must be lowercase letters, digits and dashes (max 64)".into()));
             }
             if content.len() > MAX_MEMORY_BYTES {
@@ -135,7 +135,7 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             app.activity(None, Some(session), None, "memory.updated", &format!("“{}” updated team note `{key}`", session.title), json!({ "key": key })).await;
             Ok(ToolOutput::new(key, format!("Saved note `{key}`.")))
         }
-        "noemune_update_workstream" => {
+        "hyperbeam_update_workstream" => {
             let Some(ws) = session.workstream_id else {
                 return Err(ToolError::Failed("this session does not belong to a workstream".into()));
             };
@@ -166,7 +166,7 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             app.publish("workstream", None, json!({ "id": ws }));
             Ok(ToolOutput::new("workstream", format!("Workstream updated: {}.", done.join(", "))))
         }
-        "noemune_spawn_agent" => {
+        "hyperbeam_spawn_agent" => {
             let title = arg_str(args, "title")?;
             let prompt = arg_str(args, "prompt")?;
             let repos = arg_list(args, "repos");
@@ -215,7 +215,7 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
                 ),
             ))
         }
-        "noemune_list_agents" => {
+        "hyperbeam_list_agents" => {
             let agents: Vec<Session> = sqlx::query_as(&format!("SELECT {} FROM sessions WHERE parent_id = $1 ORDER BY created_at", store::SESSION_COLUMNS))
                 .bind(session.id)
                 .fetch_all(&app.db)
@@ -223,7 +223,7 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             let text = if agents.is_empty() { "No worker agents yet.".to_string() } else { agents.iter().map(describe).collect::<Vec<_>>().join("\n") };
             Ok(ToolOutput::new("", text))
         }
-        "noemune_get_agent" => {
+        "hyperbeam_get_agent" => {
             let agent = child(app, session, args).await?;
             let mut text = describe(&agent);
             text.push_str(&format!("\n  branch: {}", agent.work_branch));
@@ -232,13 +232,13 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             }
             Ok(ToolOutput::new(agent.title, text))
         }
-        "noemune_message_agent" => {
+        "hyperbeam_message_agent" => {
             let agent = child(app, session, args).await?;
             let text = arg_str(args, "text")?;
             app.send_input(&agent, None, &format!("{} (conductor)", session.title), text).await?;
             Ok(ToolOutput::new(agent.title, "Message delivered. You will be prompted when the agent finishes its turn.".to_string()))
         }
-        "noemune_stop_agent" => {
+        "hyperbeam_stop_agent" => {
             let agent = child(app, session, args).await?;
             app.end_session(agent.id, SessionStatus::Cancelled, None).await;
             Ok(ToolOutput::new(agent.title.clone(), format!("Stopped “{}”.", agent.title)))

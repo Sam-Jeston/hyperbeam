@@ -139,7 +139,7 @@ function connect() {
     } else {
       void api.get(`/workstreams/${patch.id}`).then((r) => set({ workstreams: { ...state.workstreams, [patch.id]: r.workstream } })).catch(() => {});
     }
-    window.dispatchEvent(new CustomEvent("noemune:workstream", { detail: patch.id }));
+    window.dispatchEvent(new CustomEvent("hyperbeam:workstream", { detail: patch.id }));
   });
   es.addEventListener("activity", (e) => {
     const item = JSON.parse((e as MessageEvent).data);

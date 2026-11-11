@@ -51,7 +51,7 @@ The `grants` list is a ceiling, not a gift. The agents get the grants listed, in
 From **New work**, choose **Run a workflow**, pick it, and fill in its inputs. From the command line:
 
 ```bash
-noemune workflow ship-feature -i feature="CSV export" --follow
+hyperbeam workflow ship-feature -i feature="CSV export" --follow
 ```
 
 Another example, a read-only investigation:

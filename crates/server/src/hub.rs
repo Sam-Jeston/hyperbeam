@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use futures::{SinkExt, StreamExt};
-use noemune_core::protocol::{PROTOCOL_VERSION, RunnerMsg, ServerMsg};
+use hyperbeam_core::protocol::{PROTOCOL_VERSION, RunnerMsg, ServerMsg};
 use tokio::sync::mpsc;
 
 pub async fn connect(State(app): State<App>, parts: Parts, upgrade: WebSocketUpgrade) -> Response {
@@ -62,7 +62,7 @@ async fn serve(app: App, session: store::Session, token: String, socket: WebSock
         Err(err) => {
             tracing::error!("could not attach runner for {session_id}: {err:#}");
             let _ = sink.close().await;
-            app.end_session(session_id, noemune_core::protocol::SessionStatus::Failed, Some(&format!("{err:#}"))).await;
+            app.end_session(session_id, hyperbeam_core::protocol::SessionStatus::Failed, Some(&format!("{err:#}"))).await;
             return;
         }
     };

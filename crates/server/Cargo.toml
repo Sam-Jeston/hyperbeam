@@ -1,17 +1,17 @@
 [package]
-name = "noemune-server"
-description = "Noemune control plane: API, scheduler, tool gateway, git proxy"
+name = "hyperbeam-server"
+description = "Hyperbeam control plane: API, scheduler, tool gateway, git proxy"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "noemune-server"
+name = "hyperbeam-server"
 path = "src/main.rs"
 
 [dependencies]
-noemune-core.workspace = true
+hyperbeam-core.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true

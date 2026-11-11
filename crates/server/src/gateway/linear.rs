@@ -2,7 +2,7 @@ use super::{ToolDef, ToolError, ToolOutput, ToolResult, arg_opt, arg_str, schema
 use crate::app::App;
 use crate::store::Session;
 use anyhow::{Context, Result, anyhow, bail};
-use noemune_core::Grant;
+use hyperbeam_core::Grant;
 use serde_json::{Value, json};
 
 pub fn tools() -> Vec<ToolDef> {

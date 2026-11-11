@@ -2,7 +2,7 @@ use super::{ToolDef, ToolError, ToolOutput, ToolResult, arg_opt, arg_str, schema
 use crate::app::App;
 use crate::store::Session;
 use anyhow::{Context, Result, anyhow, bail};
-use noemune_core::Grant;
+use hyperbeam_core::Grant;
 use reqwest::Method;
 use serde_json::{Value, json};
 
@@ -11,7 +11,7 @@ pub fn tools() -> Vec<ToolDef> {
     vec![
         tool(
             "notion_search",
-            "Search Notion pages and databases shared with the Noemune integration.",
+            "Search Notion pages and databases shared with the Hyperbeam integration.",
             schema(&[("query", "string", "Text to search for", true)]),
             Grant::NotionRead,
         ),
@@ -189,7 +189,7 @@ pub async fn call(app: &App, _session: &Session, name: &str, args: &Value) -> To
                 .flatten()
                 .map(|r| format!("[{}] {} — id {} {}", r["object"].as_str().unwrap_or(""), title_of(r), r["id"].as_str().unwrap_or(""), r["url"].as_str().unwrap_or("")))
                 .collect();
-            Ok(ToolOutput::new(query, if lines.is_empty() { "Nothing found. Pages must be shared with the Noemune integration in Notion.".into() } else { lines.join("\n") }))
+            Ok(ToolOutput::new(query, if lines.is_empty() { "Nothing found. Pages must be shared with the Hyperbeam integration in Notion.".into() } else { lines.join("\n") }))
         }
         "notion_get_page" => {
             let id = page_id(arg_str(args, "page_id")?)?;

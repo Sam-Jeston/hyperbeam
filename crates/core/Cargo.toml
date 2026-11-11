@@ -1,6 +1,6 @@
 [package]
-name = "noemune-core"
-description = "Shared domain types for Noemune: permissions, events, runner protocol, workflows"
+name = "hyperbeam-core"
+description = "Shared domain types for Hyperbeam: permissions, events, runner protocol, workflows"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

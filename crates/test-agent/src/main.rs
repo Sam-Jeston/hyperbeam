@@ -7,7 +7,7 @@
 //! !think <text>         stream a thought
 //! !plan a; b; c         publish a plan
 //! !sh <command>         run a shell command in the workspace
-//! !mcp <tool> <json>    call a tool on the Noemune gateway
+//! !mcp <tool> <json>    call a tool on the Hyperbeam gateway
 //! !model               say which model is selected
 //! !sleep <seconds>
 //! !fail <message>       end the turn with an error
@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
                         "mcpCapabilities": { "http": true, "sse": false },
                         "promptCapabilities": {},
                     },
-                    "agentInfo": { "name": "noemune-test-agent", "title": "Test agent", "version": env!("CARGO_PKG_VERSION") },
+                    "agentInfo": { "name": "hyperbeam-test-agent", "title": "Test agent", "version": env!("CARGO_PKG_VERSION") },
                     "authMethods": [],
                 }),
             ),
@@ -285,7 +285,7 @@ impl Agent {
     async fn mcp(&self, rest: &str) {
         let (tool, args) = rest.split_once(' ').unwrap_or((rest, "{}"));
         let arguments: Value = serde_json::from_str(args).unwrap_or_else(|_| json!({}));
-        let id = self.begin_tool(&format!("noemune · {tool}"), "other", arguments.clone());
+        let id = self.begin_tool(&format!("hyperbeam · {tool}"), "other", arguments.clone());
         let (url, auth) = {
             let state = self.state.lock().await;
             (state.mcp_url.clone(), state.mcp_auth.clone())

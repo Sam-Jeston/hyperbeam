@@ -1,13 +1,13 @@
 ---
 title: Harnesses and models
-description: Which coding agents Noemune runs, how to add your own, and how models are chosen.
+description: Which coding agents Hyperbeam runs, how to add your own, and how models are chosen.
 ---
 
-A **harness** is the coding agent that runs inside each sandbox. Noemune drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) (ACP) on stdio. Harnesses are managed under **Settings → Harnesses**.
+A **harness** is the coding agent that runs inside each sandbox. Hyperbeam drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) (ACP) on stdio. Harnesses are managed under **Settings → Harnesses**.
 
 ## Built-in profiles
 
-Noemune ships profiles for **Claude Code**, **Codex**, **Gemini CLI** and **OpenCode**. Each needs a [credential](/credentials) before it can start.
+Hyperbeam ships profiles for **Claude Code**, **Codex**, **Gemini CLI** and **OpenCode**. Each needs a [credential](/credentials) before it can start.
 
 On Kubernetes, set each profile’s image to one you have built and pushed. See [Install on Kubernetes](/install-kubernetes#build-and-push-the-images).
 
@@ -19,7 +19,7 @@ Select **Add a harness** and fill in:
 |---|---|
 | Name | Lowercase letters, digits and dashes. Used in workflows and `--harness`. |
 | Title, description | How it appears in **New work**. |
-| Container image | Needs `git` and the agent itself. Noemune adds its runner at start-up. |
+| Container image | Needs `git` and the agent itself. Hyperbeam adds its runner at start-up. |
 | Command | JSON array that starts the agent speaking ACP on stdio, such as `["my-agent", "--acp"]`. |
 | Default model | Used when someone starts work without choosing a model. |
 | Model environment variable | Optional. Also set to the chosen model, for agents that read it from the environment. |
@@ -31,9 +31,9 @@ Select **Add a harness** and fill in:
 
 ## Models
 
-Each session runs on a model chosen when it starts: in **New work**, with `noemune run --model`, or with `model:` in a workflow. A harness profile can set the default used when nobody chooses, and can limit the choice to a list.
+Each session runs on a model chosen when it starts: in **New work**, with `hyperbeam run --model`, or with `model:` in a workflow. A harness profile can set the default used when nobody chooses, and can limit the choice to a list.
 
-The list offered comes from the harness itself. Noemune reads the standard ACP `model` session option and remembers what each harness reported. It asks as soon as it can: when a harness is given a credential, or its image or command changes, Noemune starts the harness for a few seconds in a sandbox of its own, records the list and removes the sandbox. **Refresh** under **Settings → Harnesses** asks again.
+The list offered comes from the harness itself. Hyperbeam reads the standard ACP `model` session option and remembers what each harness reported. It asks as soon as it can: when a harness is given a credential, or its image or command changes, Hyperbeam starts the harness for a few seconds in a sandbox of its own, records the list and removes the sandbox. **Refresh** under **Settings → Harnesses** asks again.
 
 That sandbox is not a session: it has no repositories, tools or permissions.
 

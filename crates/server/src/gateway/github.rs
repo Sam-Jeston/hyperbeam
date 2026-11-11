@@ -2,7 +2,7 @@ use super::{ToolDef, ToolError, ToolOutput, ToolResult, arg_list, arg_opt, arg_s
 use crate::app::App;
 use crate::integrations::github::Access;
 use crate::store::{self, Link, Session};
-use noemune_core::Grant;
+use hyperbeam_core::Grant;
 use reqwest::Method;
 use serde_json::{Value, json};
 
@@ -233,7 +233,7 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             let base = arg_opt(args, "base").unwrap_or(&default_branch).to_string();
             let author = store::user_by_id(&app.db, session.created_by).await?.map(|u| u.name).unwrap_or_default();
             let body = format!(
-                "{}\n\n---\n_Opened by a [Noemune]({}/sessions/{}) agent on behalf of {author}._",
+                "{}\n\n---\n_Opened by a [Hyperbeam]({}/sessions/{}) agent on behalf of {author}._",
                 arg_opt(args, "body").unwrap_or(""),
                 app.cfg.public_url.trim_end_matches('/'),
                 session.id

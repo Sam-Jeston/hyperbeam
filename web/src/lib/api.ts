@@ -1,4 +1,4 @@
-// Thin client for the Noemune HTTP API. The browser session cookie
+// Thin client for the Hyperbeam HTTP API. The browser session cookie
 // authenticates every call.
 
 export class ApiError extends Error {
@@ -163,7 +163,7 @@ export interface Harness {
   model_env: string | null;
   /** What to offer when starting work. */
   model_choices: ModelChoice[];
-  /** Noemune is asking the harness which models it offers. */
+  /** Hyperbeam is asking the harness which models it offers. */
   models_refreshing: boolean;
   /** Why the last attempt to ask failed, if it did. */
   models_error: string | null;

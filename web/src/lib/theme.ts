@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 
 export type ThemeChoice = "dark" | "light" | "system";
 
-const KEY = "noemune:theme";
+const KEY = "hyperbeam:theme";
 const listeners = new Set<() => void>();
 const media = window.matchMedia("(prefers-color-scheme: light)");
 

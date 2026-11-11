@@ -1,5 +1,5 @@
 [package]
-name = "noemune-runner"
+name = "hyperbeam-runner"
 description = "In-sandbox runner: prepares the workspace and drives a coding-agent harness over ACP"
 version.workspace = true
 edition.workspace = true
@@ -7,11 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "noemune-runner"
+name = "hyperbeam-runner"
 path = "src/main.rs"
 
 [dependencies]
-noemune-core.workspace = true
+hyperbeam-core.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

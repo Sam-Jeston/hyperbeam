@@ -3,15 +3,15 @@ title: Security model
 description: What a sandbox holds, what it can reach, and how every action outside it is checked and recorded.
 ---
 
-Noemune is built so that an agent can do only what the person who started it may, and so that agents never hold your integration credentials.
+Hyperbeam is built so that an agent can do only what the person who started it may, and so that agents never hold your integration credentials.
 
 ## What a sandbox holds
 
-A session’s sandbox holds exactly one Noemune credential: a **run token** that identifies the session. With it the runner dials out to the control plane; nothing connects in. The token is revoked the moment the session ends.
+A session’s sandbox holds exactly one Hyperbeam credential: a **run token** that identifies the session. With it the runner dials out to the control plane; nothing connects in. The token is revoked the moment the session ends.
 
 The sandbox also receives the [harness credential](/credentials#what-the-agent-can-see) its agent needs to call its model provider.
 
-## Every way out goes through Noemune
+## Every way out goes through Hyperbeam
 
 | Path | What it is for | What is checked |
 |---|---|---|

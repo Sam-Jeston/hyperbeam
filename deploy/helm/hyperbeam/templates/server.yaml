@@ -1,19 +1,19 @@
-{{- $name := include "noemune.name" . }}
+{{- $name := include "hyperbeam.name" . }}
 {{- $tag := .Values.image.tag | default .Chart.AppVersion }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ $name }}
-  labels: {{- include "noemune.labels" . | nindent 4 }}
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ $name }}
-  labels: {{- include "noemune.labels" . | nindent 4 }}
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
-  selector: {{- include "noemune.selector" . | nindent 4 }}
+  selector: {{- include "hyperbeam.selector" . | nindent 4 }}
   ports:
     - name: http
       port: {{ .Values.service.port }}
@@ -26,7 +26,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ $name }}
-  labels: {{- include "noemune.labels" . | nindent 4 }}
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
 spec:
   # One replica: live session state is held in memory. A restart is safe;
   # running sandboxes reconnect on their own.
@@ -34,10 +34,10 @@ spec:
   strategy:
     type: Recreate
   selector:
-    matchLabels: {{- include "noemune.selector" . | nindent 6 }}
+    matchLabels: {{- include "hyperbeam.selector" . | nindent 6 }}
   template:
     metadata:
-      labels: {{- include "noemune.selector" . | nindent 8 }}
+      labels: {{- include "hyperbeam.selector" . | nindent 8 }}
       annotations:
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
@@ -52,43 +52,43 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["serve"]
           env:
-            - name: NOEMUNE_DATABASE_URL
+            - name: HYPERBEAM_DATABASE_URL
               valueFrom:
-                secretKeyRef: { name: {{ include "noemune.secretName" . }}, key: database-url }
-            - name: NOEMUNE_MASTER_KEY
+                secretKeyRef: { name: {{ include "hyperbeam.secretName" . }}, key: database-url }
+            - name: HYPERBEAM_MASTER_KEY
               valueFrom:
-                secretKeyRef: { name: {{ include "noemune.secretName" . }}, key: master-key }
-            - name: NOEMUNE_LISTEN
+                secretKeyRef: { name: {{ include "hyperbeam.secretName" . }}, key: master-key }
+            - name: HYPERBEAM_LISTEN
               value: "0.0.0.0:8080"
-            - name: NOEMUNE_PUBLIC_URL
+            - name: HYPERBEAM_PUBLIC_URL
               value: {{ .Values.publicUrl | quote }}
-            - name: NOEMUNE_INTERNAL_URL
-              value: "http://{{ include "noemune.serviceHost" . }}:{{ .Values.service.port }}"
-            - name: NOEMUNE_EGRESS_LISTEN
+            - name: HYPERBEAM_INTERNAL_URL
+              value: "http://{{ include "hyperbeam.serviceHost" . }}:{{ .Values.service.port }}"
+            - name: HYPERBEAM_EGRESS_LISTEN
               value: "0.0.0.0:8081"
             {{- if .Values.egress.enforce }}
-            - name: NOEMUNE_EGRESS_ADDR
-              value: "{{ include "noemune.serviceHost" . }}:8081"
+            - name: HYPERBEAM_EGRESS_ADDR
+              value: "{{ include "hyperbeam.serviceHost" . }}:8081"
             {{- end }}
-            - name: NOEMUNE_EGRESS_ALLOW
+            - name: HYPERBEAM_EGRESS_ALLOW
               value: {{ join "," .Values.egress.allow | quote }}
-            - name: NOEMUNE_SANDBOX_DRIVER
+            - name: HYPERBEAM_SANDBOX_DRIVER
               value: kubernetes
-            - name: NOEMUNE_K8S_NAMESPACE
+            - name: HYPERBEAM_K8S_NAMESPACE
               value: {{ .Values.agents.namespace | quote }}
-            - name: NOEMUNE_RUNNER_IMAGE
+            - name: HYPERBEAM_RUNNER_IMAGE
               value: "{{ .Values.agents.runnerImage.repository }}:{{ .Values.agents.runnerImage.tag | default .Chart.AppVersion }}"
-            - name: NOEMUNE_K8S_IMAGE_PULL_POLICY
+            - name: HYPERBEAM_K8S_IMAGE_PULL_POLICY
               value: {{ .Values.agents.imagePullPolicy | quote }}
-            - name: NOEMUNE_K8S_CPU_LIMIT
+            - name: HYPERBEAM_K8S_CPU_LIMIT
               value: {{ .Values.agents.cpuLimit | quote }}
-            - name: NOEMUNE_K8S_MEMORY_LIMIT
+            - name: HYPERBEAM_K8S_MEMORY_LIMIT
               value: {{ .Values.agents.memoryLimit | quote }}
-            - name: NOEMUNE_K8S_WORKSPACE_SIZE
+            - name: HYPERBEAM_K8S_WORKSPACE_SIZE
               value: {{ .Values.agents.workspaceSize | quote }}
-            - name: NOEMUNE_MAX_SESSIONS
+            - name: HYPERBEAM_MAX_SESSIONS
               value: {{ .Values.agents.maxSessions | quote }}
-            - name: NOEMUNE_IDLE_TIMEOUT_SECS
+            - name: HYPERBEAM_IDLE_TIMEOUT_SECS
               value: {{ .Values.agents.idleTimeoutSeconds | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
@@ -115,7 +115,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ $name }}
-  labels: {{- include "noemune.labels" . | nindent 4 }}
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations: {{- toYaml . | nindent 4 }}
   {{- end }}

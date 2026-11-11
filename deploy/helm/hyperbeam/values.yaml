@@ -1,12 +1,12 @@
 image:
-  repository: ghcr.io/noemune/server
+  repository: ghcr.io/hyperbeam/server
   tag: ""            # defaults to the chart's appVersion
   pullPolicy: IfNotPresent
 
 # URL people use to reach the UI. Used in invite links and pull request footers.
 publicUrl: http://localhost:8080
 
-# Encrypts stored credentials. Generate with `noemune-server gen-key` or
+# Encrypts stored credentials. Generate with `hyperbeam-server gen-key` or
 # `openssl rand -base64 32`. Losing it makes stored credentials unreadable.
 # Alternatively point existingSecret at a Secret with keys `master-key` and
 # `database-url`.
@@ -28,9 +28,9 @@ postgres:
 
 agents:
   # Namespace agent pods run in. Created by the chart.
-  namespace: noemune-agents
+  namespace: hyperbeam-agents
   runnerImage:
-    repository: ghcr.io/noemune/runner
+    repository: ghcr.io/hyperbeam/runner
     tag: ""
   imagePullPolicy: IfNotPresent
   cpuLimit: "2"
@@ -40,7 +40,7 @@ agents:
   idleTimeoutSeconds: 900
 
 egress:
-  # Route all sandbox traffic through Noemune's allowlist proxy and block
+  # Route all sandbox traffic through Hyperbeam's allowlist proxy and block
   # everything else with a NetworkPolicy. Needs a CNI that enforces
   # NetworkPolicy (Calico, Cilium, ...); without one the policy is ignored
   # and only well-behaved clients are constrained.

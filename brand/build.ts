@@ -36,8 +36,7 @@ export async function rebaseFonts(cssFile: string, base: string) {
 }
 
 /** Inline script for <head>: apply the saved theme before first paint. Dark unless someone chose otherwise. */
-export const THEME_SCRIPT = `(function(){var t="dark";try{t=localStorage.getItem("noemune:theme")||"dark"}catch(e){}var l=t==="light"||(t==="system"&&matchMedia("(prefers-color-scheme: light)").matches);document.documentElement.className=l?"light":"dark"})()`;
+export const THEME_SCRIPT = `(function(){var t="dark";try{t=localStorage.getItem("hyperbeam:theme")||"dark"}catch(e){}var l=t==="light"||(t==="system"&&matchMedia("(prefers-color-scheme: light)").matches);document.documentElement.className=l?"light":"dark"})()`;
 
 /** The mark as a data: URL, for favicons. */
-export const FAVICON =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23161d19'/%3E%3Ccircle cx='16' cy='16' r='11.5' fill='none' stroke='%23b98ae0' stroke-width='2.6'/%3E%3Ccircle cx='12.4' cy='16.8' r='3.9' fill='%23b98ae0'/%3E%3Ccircle cx='20.3' cy='11.4' r='2.5' fill='%23ee7c9c'/%3E%3Ccircle cx='20.5' cy='20.9' r='2.5' fill='%23ee7c9c'/%3E%3C/svg%3E";
+export { FAVICON } from "./mark";

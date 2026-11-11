@@ -1,4 +1,4 @@
-//! Shared domain types for Noemune.
+//! Shared domain types for Hyperbeam.
 
 pub mod grants;
 pub mod protocol;

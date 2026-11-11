@@ -10,7 +10,7 @@ use axum::http::request::Parts;
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
-pub const COOKIE_NAME: &str = "noemune_session";
+pub const COOKIE_NAME: &str = "hyperbeam_session";
 pub const SESSION_DAYS: i64 = 30;
 
 pub fn bearer(parts: &Parts) -> Option<String> {

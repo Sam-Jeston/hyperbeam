@@ -2,6 +2,6 @@ target
 **/node_modules
 web/dist
 .git
-.noemune-dev
+.hyperbeam-dev
 site/dist
 docs/dist

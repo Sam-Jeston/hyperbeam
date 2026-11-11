@@ -49,7 +49,7 @@ impl App {
     pub fn new(cfg: Config, db: PgPool, secrets: SecretBox, driver: Arc<dyn SandboxDriver>) -> Self {
         let (bus, _) = broadcast::channel(4096);
         let http = reqwest::Client::builder()
-            .user_agent(concat!("noemune/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("hyperbeam/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("http client");

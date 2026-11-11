@@ -31,7 +31,7 @@ Type in the box at the bottom and press <kbd>Enter</kbd> to send (<kbd>Shift</kb
 
 ## Asleep and waking up
 
-A sandbox that has been idle for 15 minutes is torn down, and the session shows as **Asleep**. Send it a message to resume: Noemune starts a fresh sandbox from the branch the agent pushed, and the conversation carries on.
+A sandbox that has been idle for 15 minutes is torn down, and the session shows as **Asleep**. Send it a message to resume: Hyperbeam starts a fresh sandbox from the branch the agent pushed, and the conversation carries on.
 
 > [!TIP]
 > Ask agents to push their work as they go. Workspaces are ephemeral, so only pushed work survives a teardown.

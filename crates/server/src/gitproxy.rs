@@ -17,8 +17,8 @@ use axum::response::{IntoResponse, Response};
 use base64::Engine;
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
-use noemune_core::Grant;
-use noemune_core::protocol::event;
+use hyperbeam_core::Grant;
+use hyperbeam_core::protocol::event;
 use serde_json::json;
 
 const MAX_COMMAND_BYTES: usize = 1024 * 1024;
@@ -101,7 +101,7 @@ fn split_path(path: &str) -> Option<(String, &str)> {
     let rest = parts.next()?;
     let name = name.strip_suffix(".git").unwrap_or(name);
     let repo = format!("{owner}/{name}");
-    noemune_core::workflow::valid_repo(&repo).then_some((repo, rest))
+    hyperbeam_core::workflow::valid_repo(&repo).then_some((repo, rest))
 }
 
 async fn record(app: &App, session: &Session, action: &str, target: &str, allowed: bool, detail: &str) {
@@ -127,12 +127,12 @@ pub async fn handle(
     body: Body,
 ) -> Response {
     let Some(token) = bearer(&parts) else {
-        return (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, "Basic realm=\"noemune\"")]).into_response();
+        return (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, "Basic realm=\"hyperbeam\"")]).into_response();
     };
     let session = match app.session_for_token(&token).await {
         Ok(Some(session)) => session,
         Ok(None) => return deny(StatusCode::UNAUTHORIZED, "this session has ended; its git access is revoked\n"),
-        Err(_) => return deny(StatusCode::INTERNAL_SERVER_ERROR, "noemune: internal error\n"),
+        Err(_) => return deny(StatusCode::INTERNAL_SERVER_ERROR, "hyperbeam: internal error\n"),
     };
     let Some((repo, rest)) = split_path(&path) else { return deny(StatusCode::NOT_FOUND, "not a repository path\n") };
 
@@ -142,18 +142,18 @@ pub async fn handle(
         ("GET", "info/refs") if query.contains("service=git-receive-pack") => Op::Push,
         ("POST", "git-upload-pack") => Op::Fetch,
         ("POST", "git-receive-pack") => Op::Push,
-        _ => return deny(StatusCode::NOT_FOUND, "noemune proxies the git smart HTTP protocol only\n"),
+        _ => return deny(StatusCode::NOT_FOUND, "hyperbeam proxies the git smart HTTP protocol only\n"),
     };
     let action = if op == Op::Push { "git push" } else { "git fetch" };
 
     let Some(registered) = session.repos.0.iter().find(|r| r.eq_ignore_ascii_case(&repo)).cloned() else {
         record(&app, &session, action, &repo, false, "repository is not part of this session").await;
-        return deny(StatusCode::FORBIDDEN, format!("noemune: {repo} is not one of this session's repositories\n"));
+        return deny(StatusCode::FORBIDDEN, format!("hyperbeam: {repo} is not one of this session's repositories\n"));
     };
     let needed = if op == Op::Push { Grant::GithubWrite } else { Grant::GithubRead };
     if !session.grants.has(needed) {
         record(&app, &session, action, &registered, false, &format!("requires {needed}")).await;
-        return deny(StatusCode::FORBIDDEN, format!("noemune: this session lacks {needed}\n"));
+        return deny(StatusCode::FORBIDDEN, format!("hyperbeam: this session lacks {needed}\n"));
     }
 
     // For the push itself, read the ref updates before forwarding anything.
@@ -162,18 +162,18 @@ pub async fn handle(
     let is_push_post = op == Op::Push && method == Method::POST;
     if is_push_post {
         if headers.contains_key(header::CONTENT_ENCODING) {
-            return deny(StatusCode::BAD_REQUEST, "noemune: compressed push requests are not accepted\n");
+            return deny(StatusCode::BAD_REQUEST, "hyperbeam: compressed push requests are not accepted\n");
         }
         let updates = loop {
             match parse_push_commands(&prefix) {
                 Parsed::Done(updates, _) => break updates,
-                Parsed::Invalid(why) => return deny(StatusCode::BAD_REQUEST, format!("noemune: {why}\n")),
+                Parsed::Invalid(why) => return deny(StatusCode::BAD_REQUEST, format!("hyperbeam: {why}\n")),
                 Parsed::NeedMore if prefix.len() > MAX_COMMAND_BYTES => {
-                    return deny(StatusCode::BAD_REQUEST, "noemune: push command list too large\n");
+                    return deny(StatusCode::BAD_REQUEST, "hyperbeam: push command list too large\n");
                 }
                 Parsed::NeedMore => match body_stream.next().await {
                     Some(Ok(chunk)) => prefix.extend_from_slice(&chunk),
-                    _ => return deny(StatusCode::BAD_REQUEST, "noemune: truncated push request\n"),
+                    _ => return deny(StatusCode::BAD_REQUEST, "hyperbeam: truncated push request\n"),
                 },
             }
         };
@@ -188,7 +188,7 @@ pub async fn handle(
             record(&app, &session, action, &registered, false, &detail).await;
             return deny(
                 StatusCode::FORBIDDEN,
-                format!("noemune: {detail}. Push your work branch and open a pull request instead.\n"),
+                format!("hyperbeam: {detail}. Push your work branch and open a pull request instead.\n"),
             );
         }
         record(&app, &session, action, &registered, true, &refs.join(", ")).await;
@@ -199,7 +199,7 @@ pub async fn handle(
     let access = if op == Op::Push { Access::Write } else { Access::Read };
     let upstream_token = match app.github_token(&registered, access).await {
         Ok(token) => token,
-        Err(err) => return deny(StatusCode::BAD_GATEWAY, format!("noemune: {err:#}\n")),
+        Err(err) => return deny(StatusCode::BAD_GATEWAY, format!("hyperbeam: {err:#}\n")),
     };
     let mut url = format!("{}/{registered}.git/{rest}", app.cfg.github_git_url.trim_end_matches('/'));
     if !query.is_empty() {
@@ -223,7 +223,7 @@ pub async fn handle(
 
     let upstream = match request.send().await {
         Ok(response) => response,
-        Err(err) => return deny(StatusCode::BAD_GATEWAY, format!("noemune: could not reach GitHub: {err}\n")),
+        Err(err) => return deny(StatusCode::BAD_GATEWAY, format!("hyperbeam: could not reach GitHub: {err}\n")),
     };
     let mut response = Response::builder().status(upstream.status().as_u16());
     for name in [header::CONTENT_TYPE, header::CACHE_CONTROL, header::CONTENT_ENCODING] {
@@ -233,7 +233,7 @@ pub async fn handle(
     }
     response
         .body(Body::from_stream(upstream.bytes_stream()))
-        .unwrap_or_else(|_| deny(StatusCode::BAD_GATEWAY, "noemune: bad upstream response\n"))
+        .unwrap_or_else(|_| deny(StatusCode::BAD_GATEWAY, "hyperbeam: bad upstream response\n"))
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ title: Start work
 description: Describe an outcome and start an agent on it, from the board, a workstream or the command line.
 ---
 
-Everything starts from **New work**. Select it in the sidebar, or press <kbd>C</kbd> anywhere in Noemune.
+Everything starts from **New work**. Select it in the sidebar, or press <kbd>C</kbd> anywhere in Hyperbeam.
 
 ## Describe the outcome
 
@@ -36,7 +36,7 @@ Checking out repositories needs *Read repositories* (`github:read`).
 
 ## Put it on the board
 
-**Put this on the board** is on by default. It creates a [workstream](/board) so the team can follow and discuss the work. Give it a title, or let Noemune use the first line of your request.
+**Put this on the board** is on by default. It creates a [workstream](/board) so the team can follow and discuss the work. Give it a title, or let Hyperbeam use the first line of your request.
 
 Select **Start agent** (or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd>). You land on the agent’s page and can [watch it work](/sessions).
 
@@ -51,8 +51,8 @@ If your team has [workflows](/workflows), **New work** has a **Run a workflow** 
 ## From the command line
 
 ```bash
-noemune run "Fix the flaky checkout test" --repo acme/web --follow
-noemune run "Add dark mode" --conductor --repo acme/api --repo acme/web --workstream "Dark mode"
+hyperbeam run "Fix the flaky checkout test" --repo acme/web --follow
+hyperbeam run "Add dark mode" --conductor --repo acme/api --repo acme/web --workstream "Dark mode"
 ```
 
 See [Command line](/cli).

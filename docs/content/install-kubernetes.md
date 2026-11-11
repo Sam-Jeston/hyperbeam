@@ -3,7 +3,7 @@ title: Install on Kubernetes
 description: Build the images, install the Helm chart, and point the harness profiles at your images.
 ---
 
-The Helm chart in `deploy/helm/noemune` installs the control plane, an optional Postgres, and a locked-down namespace for agent sandboxes.
+The Helm chart in `deploy/helm/hyperbeam` installs the control plane, an optional Postgres, and a locked-down namespace for agent sandboxes.
 
 ## Before you start
 
@@ -16,9 +16,9 @@ The Helm chart in `deploy/helm/noemune` installs the control plane, an optional 
 The project does not publish images yet, so build them from the repository:
 
 ```bash
-docker build -f deploy/docker/Dockerfile --target server -t REGISTRY/noemune/server:0.1.0 .
-docker build -f deploy/docker/Dockerfile --target runner -t REGISTRY/noemune/runner:0.1.0 .
-docker build -f deploy/docker/Dockerfile.harness --target claude-code -t REGISTRY/noemune/harness-claude-code:0.1.0 .
+docker build -f deploy/docker/Dockerfile --target server -t REGISTRY/hyperbeam/server:0.1.0 .
+docker build -f deploy/docker/Dockerfile --target runner -t REGISTRY/hyperbeam/runner:0.1.0 .
+docker build -f deploy/docker/Dockerfile.harness --target claude-code -t REGISTRY/hyperbeam/harness-claude-code:0.1.0 .
 ```
 
 Push them to your registry. Build a harness image for each agent you plan to use, and add your language toolchains to `Dockerfile.harness` so agents can build and test your code.
@@ -26,17 +26,17 @@ Push them to your registry. Build a harness image for each agent you plan to use
 ## Install the chart
 
 ```bash
-helm install noemune deploy/helm/noemune --namespace noemune --create-namespace \
+helm install hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --create-namespace \
   --set masterKey="$(openssl rand -base64 32)" \
-  --set image.repository=REGISTRY/noemune/server \
-  --set agents.runnerImage.repository=REGISTRY/noemune/runner \
-  --set publicUrl=https://noemune.example.com
+  --set image.repository=REGISTRY/hyperbeam/server \
+  --set agents.runnerImage.repository=REGISTRY/hyperbeam/runner \
+  --set publicUrl=https://hyperbeam.example.com
 ```
 
 The chart stores the master key in a Kubernetes Secret and keeps the existing value on upgrade. To manage the Secret yourself, set `existingSecret` instead of `masterKey`.
 
 > [!IMPORTANT]
-> Back up the master key. It encrypts every stored credential, and Noemune can’t yet rotate it. See [Credentials](/credentials#the-master-key).
+> Back up the master key. It encrypts every stored credential, and Hyperbeam can’t yet rotate it. See [Credentials](/credentials#the-master-key).
 
 Then open the UI, create the team, and under **Settings → Harnesses** set each harness profile’s image to the one you pushed. Continue with [Set up a team](/team-setup).
 
@@ -44,14 +44,14 @@ Then open the UI, create the team, and under **Settings → Harnesses** set each
 
 - The control plane, as one replica.
 - A single-instance Postgres, unless you set `database.url` to use your own.
-- A namespace for sandboxes, `noemune-agents`, under the `restricted` Pod Security Standard. The control plane may create and delete pods and their token secrets there, and nothing else.
+- A namespace for sandboxes, `hyperbeam-agents`, under the `restricted` Pod Security Standard. The control plane may create and delete pods and their token secrets there, and nothing else.
 - A NetworkPolicy that lets sandboxes reach only the control plane and cluster DNS. With `egress.enforce: true` (the default) everything else goes through the egress allowlist proxy.
 
 Each session gets a pod that runs as a non-root user with no service account token, no added capabilities, and resource limits (2 CPUs, 4 GiB of memory and a 10 GiB workspace by default). Idle sandboxes are torn down after 15 minutes.
 
 ## Network isolation
 
-The NetworkPolicy is what keeps sandboxes from reaching anything but Noemune.
+The NetworkPolicy is what keeps sandboxes from reaching anything but Hyperbeam.
 
 > [!WARNING]
 > On a cluster whose CNI does not enforce NetworkPolicy, the policy is silently ignored and sandboxes have open network access.

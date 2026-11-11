@@ -1,9 +1,9 @@
 ---
 title: Quick start
-description: Run Noemune on your laptop and connect your first coding agent.
+description: Run Hyperbeam on your laptop and connect your first coding agent.
 ---
 
-This runs agents as ordinary local processes with **no isolation**. It is for trying Noemune out. To run it for a team, [install it on Kubernetes](/install-kubernetes).
+This runs agents as ordinary local processes with **no isolation**. It is for trying Hyperbeam out. To run it for a team, [install it on Kubernetes](/install-kubernetes).
 
 ## Before you start
 
@@ -12,11 +12,11 @@ You need [Docker](https://docs.docker.com/get-docker/) (for Postgres), [Rust](ht
 ## 1. Start Postgres
 
 ```bash
-docker run -d --name noemune-pg -e POSTGRES_USER=noemune -e POSTGRES_PASSWORD=noemune \
-  -e POSTGRES_DB=noemune -p 127.0.0.1:5440:5432 postgres:16
+docker run -d --name hyperbeam-pg -e POSTGRES_USER=hyperbeam -e POSTGRES_PASSWORD=hyperbeam \
+  -e POSTGRES_DB=hyperbeam -p 127.0.0.1:5440:5432 postgres:16
 ```
 
-## 2. Build Noemune
+## 2. Build Hyperbeam
 
 The web UI is embedded in the server binary, so build it first.
 
@@ -28,9 +28,9 @@ cargo build --release
 ## 3. Start the server
 
 ```bash
-export NOEMUNE_DATABASE_URL=postgres://noemune:noemune@127.0.0.1:5440/noemune
-export NOEMUNE_MASTER_KEY=$(./target/release/noemune-server gen-key)
-./target/release/noemune-server serve
+export HYPERBEAM_DATABASE_URL=postgres://hyperbeam:hyperbeam@127.0.0.1:5440/hyperbeam
+export HYPERBEAM_MASTER_KEY=$(./target/release/hyperbeam-server gen-key)
+./target/release/hyperbeam-server serve
 ```
 
 > [!WARNING]
@@ -40,7 +40,7 @@ Open <http://localhost:8080>. The first person in creates the team and owns it.
 
 ## 4. Connect an agent
 
-Noemune drives coding agents over the [Agent Client Protocol](https://agentclientprotocol.com) (ACP). In this local mode the agent runs on your machine, so install its ACP adapter. For Claude Code:
+Hyperbeam drives coding agents over the [Agent Client Protocol](https://agentclientprotocol.com) (ACP). In this local mode the agent runs on your machine, so install its ACP adapter. For Claude Code:
 
 ```bash
 npm i -g @agentclientprotocol/claude-agent-acp

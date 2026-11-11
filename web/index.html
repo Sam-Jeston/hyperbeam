@@ -4,13 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0f1411" />
-    <title>Noemune</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23161d19'/%3E%3Ccircle cx='16' cy='16' r='11.5' fill='none' stroke='%23b98ae0' stroke-width='2.6'/%3E%3Ccircle cx='12.4' cy='16.8' r='3.9' fill='%23b98ae0'/%3E%3Ccircle cx='20.3' cy='11.4' r='2.5' fill='%23ee7c9c'/%3E%3Ccircle cx='20.5' cy='20.9' r='2.5' fill='%23ee7c9c'/%3E%3C/svg%3E" />
+    <title>Hyperbeam</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-2 -2 20 20' shape-rendering='crispEdges'%3E%3Crect x='-2' y='-2' width='20' height='20' rx='4' fill='%23161d19'/%3E%3Cpath fill='%23b98ae0' d='M12 0h1v1h-1zM11 1h1v1h-1zM10 2h1v1h-1zM9 3h1v1h-1zM15 3h1v1h-1zM8 4h1v1h-1zM14 4h1v1h-1zM7 5h1v1h-1zM13 5h1v1h-1zM6 6h1v1h-1zM12 6h1v1h-1zM4 7h2v1h-2zM11 7h1v1h-1zM2 8h3v1h-3zM10 8h1v1h-1zM1 9h2v1h-2zM9 9h1v1h-1zM1 10h1v1h-1zM8 10h1v1h-1zM0 11h2v1h-2zM7 11h2v1h-2zM1 12h1v1h-1zM7 12h1v1h-1zM1 13h2v1h-2zM6 13h2v1h-2zM2 14h5v1h-5zM4 15h1v1h-1z'/%3E%3Cpath fill='%23ee7c9c' d='M13 0h1v1h-1zM12 1h1v1h-1zM8 2h1v1h-1zM11 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM14 3h1v1h-1zM9 4h1v1h-1zM13 4h1v1h-1zM8 5h1v1h-1zM12 5h1v1h-1zM7 6h1v1h-1zM11 6h1v1h-1zM6 7h1v1h-1zM10 7h1v1h-1zM5 8h1v1h-1zM9 8h1v1h-1zM13 8h1v1h-1zM3 9h2v1h-2zM8 9h1v1h-1zM2 10h1v1h-1zM7 10h1v1h-1zM2 11h1v1h-1zM6 11h1v1h-1zM2 12h1v1h-1zM6 12h1v1h-1zM3 13h3v1h-3z'/%3E%3Cpath fill='%23d9bdf3' d='M2 1h1v1h-1zM1 2h1v1h-1zM14 14h1v1h-1z'/%3E%3Cpath fill='%23fbf7ff' d='M14 0h2v1h-2zM13 1h3v1h-3zM12 2h3v1h-3zM11 3h3v1h-3zM10 4h3v1h-3zM9 5h3v1h-3zM8 6h3v1h-3zM7 7h3v1h-3zM6 8h3v1h-3zM5 9h3v1h-3zM3 10h4v1h-4zM3 11h3v1h-3zM3 12h3v1h-3z'/%3E%3C/svg%3E" />
     <script>
       // Apply the saved theme before first paint. Dark unless someone chose otherwise.
       (function () {
         var t = "dark";
-        try { t = localStorage.getItem("noemune:theme") || "dark"; } catch (e) {}
+        try { t = localStorage.getItem("hyperbeam:theme") || "dark"; } catch (e) {}
         var light = t === "light" || (t === "system" && matchMedia("(prefers-color-scheme: light)").matches);
         document.documentElement.className = light ? "light" : "dark";
       })();

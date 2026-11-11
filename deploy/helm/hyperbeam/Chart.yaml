@@ -1,5 +1,5 @@
 apiVersion: v2
-name: noemune
+name: hyperbeam
 description: A self-hosted platform where a team's coding agents work in the open
 type: application
 version: 0.1.0

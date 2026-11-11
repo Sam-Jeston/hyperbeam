@@ -3,11 +3,11 @@
 
 import { createCssVariablesTheme, createHighlighter } from "shiki";
 
-const theme = createCssVariablesTheme({ name: "noemune", variablePrefix: "--shiki-", fontStyle: true });
+const theme = createCssVariablesTheme({ name: "hyperbeam", variablePrefix: "--shiki-", fontStyle: true });
 
 const highlighter = await createHighlighter({ themes: [theme], langs: ["yaml", "bash", "sh", "json", "toml", "markdown", "rust", "ts", "text"] });
 
 export function highlight(code: string, lang = "text"): string {
   const known = highlighter.getLoadedLanguages().includes(lang) ? lang : "text";
-  return highlighter.codeToHtml(code.replace(/\n$/, ""), { lang: known, theme: "noemune" });
+  return highlighter.codeToHtml(code.replace(/\n$/, ""), { lang: known, theme: "hyperbeam" });
 }

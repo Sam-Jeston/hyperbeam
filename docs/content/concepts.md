@@ -3,7 +3,7 @@ title: Concepts
 description: Workstreams, agents, sandboxes, harnesses and grants, and how they relate.
 ---
 
-A handful of ideas carry the rest of Noemune.
+A handful of ideas carry the rest of Hyperbeam.
 
 ## Workstreams
 
@@ -29,7 +29,7 @@ A session is either a **worker**, which does the work itself, or a **conductor**
 
 ## Sandboxes
 
-Each live session runs in its own **sandbox**: a pod on Kubernetes, or a local process in development. The sandbox checks out the session’s repositories on its own branch, installs its skills, and runs the harness. It can reach the control plane and nothing else, except through Noemune’s proxies.
+Each live session runs in its own **sandbox**: a pod on Kubernetes, or a local process in development. The sandbox checks out the session’s repositories on its own branch, installs its skills, and runs the harness. It can reach the control plane and nothing else, except through Hyperbeam’s proxies.
 
 Sandboxes are torn down after 15 idle minutes. Work survives a teardown only if it was pushed; when you message the session again, it resumes in a fresh sandbox from the branch it pushed.
 

@@ -1,4 +1,4 @@
--- Noemune schema. One installation is one team.
+-- Hyperbeam schema. One installation is one team.
 
 CREATE TABLE settings (
     key         text PRIMARY KEY,

@@ -12,11 +12,11 @@ Under **Settings → Harnesses**, each harness shows two lines:
 - **Team credential**: used by everyone’s agents that don’t have their own. Only admins can set it.
 - **Mine**: used by your agents only, instead of the team’s.
 
-When a session starts, Noemune uses its owner’s personal credential if there is one, and the team credential otherwise.
+When a session starts, Hyperbeam uses its owner’s personal credential if there is one, and the team credential otherwise.
 
 ## Subscription tokens
 
-Some harness profiles also accept a personal subscription token (for Claude Code, from `claude setup-token`) as well as an API key. Noemune treats these as personal: only their owner can set one, for their own sessions, never as a team credential.
+Some harness profiles also accept a personal subscription token (for Claude Code, from `claude setup-token`) as well as an API key. Hyperbeam treats these as personal: only their owner can set one, for their own sessions, never as a team credential.
 
 > [!WARNING]
 > Whether a subscription may be used this way is decided by your provider’s terms, which changed more than once during 2026. For a team or anything automated, use API keys.
@@ -33,7 +33,7 @@ A harness credential is delivered to the sandbox of a session that needs it, as 
 
 ## The master key
 
-The master key is 32 random bytes, base64-encoded, set with `NOEMUNE_MASTER_KEY`. Generate one with `noemune-server gen-key` or `openssl rand -base64 32`. The Helm chart keeps it in a Kubernetes Secret.
+The master key is 32 random bytes, base64-encoded, set with `HYPERBEAM_MASTER_KEY`. Generate one with `hyperbeam-server gen-key` or `openssl rand -base64 32`. The Helm chart keeps it in a Kubernetes Secret.
 
 > [!IMPORTANT]
-> Back the master key up, and don’t change it. Noemune can’t yet rotate it: credentials stored under one key can’t be read with another, and would have to be entered again.
+> Back the master key up, and don’t change it. Hyperbeam can’t yet rotate it: credentials stored under one key can’t be read with another, and would have to be entered again.

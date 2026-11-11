@@ -14,7 +14,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use futures::Stream;
-use noemune_core::Grant;
+use hyperbeam_core::Grant;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use std::convert::Infallible;

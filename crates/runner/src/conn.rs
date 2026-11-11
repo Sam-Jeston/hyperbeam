@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use futures::{SinkExt, StreamExt};
-use noemune_core::protocol::{PROTOCOL_VERSION, RunnerMsg, ServerMsg};
+use hyperbeam_core::protocol::{PROTOCOL_VERSION, RunnerMsg, ServerMsg};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -29,7 +29,7 @@ impl Link {
 }
 
 pub fn ws_url(server_url: &str) -> Result<String> {
-    let mut url = url::Url::parse(server_url).context("NOEMUNE_SERVER_URL is not a valid URL")?;
+    let mut url = url::Url::parse(server_url).context("HYPERBEAM_SERVER_URL is not a valid URL")?;
     let scheme = match url.scheme() {
         "http" | "ws" => "ws",
         "https" | "wss" => "wss",
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn builds_ws_urls() {
-        assert_eq!(ws_url("http://noemune:8080").unwrap(), "ws://noemune:8080/runner/v1/connect");
+        assert_eq!(ws_url("http://hyperbeam:8080").unwrap(), "ws://hyperbeam:8080/runner/v1/connect");
         assert_eq!(ws_url("https://n.example.com/base/").unwrap(), "wss://n.example.com/base/runner/v1/connect");
         assert!(ws_url("ftp://x").is_err());
     }

@@ -65,7 +65,7 @@ interface Integration {
 const INTEGRATION_COPY: Record<string, { title: string; blurb: string; tile: string }> = {
   github: { title: "GitHub", blurb: "Lets agents clone and push to registered repositories, and work with issues and pull requests.", tile: "G" },
   linear: { title: "Linear", blurb: "Lets agents read, create and update issues.", tile: "L" },
-  notion: { title: "Notion", blurb: "Lets agents read and write the pages you share with the Noemune integration.", tile: "N" },
+  notion: { title: "Notion", blurb: "Lets agents read and write the pages you share with the Hyperbeam integration.", tile: "N" },
 };
 
 function Integrations({ isAdmin }: { isAdmin: boolean }) {
@@ -87,7 +87,7 @@ function Integrations({ isAdmin }: { isAdmin: boolean }) {
   return (
     <>
       <Lead>
-        These credentials stay in Noemune’s control plane. Agents never see them: every request an agent makes goes through Noemune, which checks it against the permissions of the person who started the agent.
+        These credentials stay in Hyperbeam’s control plane. Agents never see them: every request an agent makes goes through Hyperbeam, which checks it against the permissions of the person who started the agent.
       </Lead>
       <ErrorNote error={error} />
       {!data && !error && <CardsSkeleton />}
@@ -158,7 +158,7 @@ function IntegrationDialog({ integration, onClose }: { integration: Integration;
     >
       {kind === "github" && (
         <>
-          <Field label="How Noemune authenticates">
+          <Field label="How Hyperbeam authenticates">
             {(id) => (
               <Select
                 id={id}
@@ -173,7 +173,7 @@ function IntegrationDialog({ integration, onClose }: { integration: Integration;
           </Field>
           <p className="text-[13px] text-muted">
             {isApp
-              ? "Create a GitHub App with repository permissions Contents, Pull requests and Issues set to read & write, install it on the repositories you will register, then paste its App ID and a generated private key. Noemune mints a short-lived token per repository for each request."
+              ? "Create a GitHub App with repository permissions Contents, Pull requests and Issues set to read & write, install it on the repositories you will register, then paste its App ID and a generated private key. Hyperbeam mints a short-lived token per repository for each request."
               : "A fine-grained personal access token limited to the repositories you will register, with Contents, Pull requests and Issues set to read & write. Everything agents do on GitHub will appear as this token’s user."}
           </p>
           {isApp && <Field label="App ID">{(id) => <Input id={id} mono value={appId} onChange={(e) => setAppId(e.target.value)} />}</Field>}
@@ -272,7 +272,7 @@ function Harnesses({ isAdmin }: { isAdmin: boolean }) {
   return (
     <>
       <Lead action={isAdmin && <Button onClick={() => setEditing("new")}><Plus /> Add a harness</Button>}>
-        A harness is the coding agent that runs inside each sandbox. Noemune drives any agent that speaks the Agent Client Protocol. Give each one a credential: a team API key, or your own.
+        A harness is the coding agent that runs inside each sandbox. Hyperbeam drives any agent that speaks the Agent Client Protocol. Give each one a credential: a team API key, or your own.
       </Lead>
       <ErrorNote error={error} />
       {!data && !error && <CardsSkeleton />}
@@ -453,7 +453,7 @@ function HarnessDialog({ harness, onClose }: { harness: Harness | null; onClose:
         <Field label="Title" className={harness ? "sm:col-span-2" : undefined}>{(id) => <Input id={id} value={title} onChange={(e) => setTitle(e.target.value)} />}</Field>
       </div>
       <Field label="Description">{(id) => <Input id={id} value={description} onChange={(e) => setDescription(e.target.value)} />}</Field>
-      <Field label="Container image" hint="Needs git and the agent itself. Noemune adds its runner at start-up.">{(id) => <Input id={id} mono value={image} onChange={(e) => setImage(e.target.value)} placeholder="ghcr.io/acme/my-agent:1.2" />}</Field>
+      <Field label="Container image" hint="Needs git and the agent itself. Hyperbeam adds its runner at start-up.">{(id) => <Input id={id} mono value={image} onChange={(e) => setImage(e.target.value)} placeholder="ghcr.io/acme/my-agent:1.2" />}</Field>
       <Field label="Command" hint="JSON array that starts the agent speaking the Agent Client Protocol on stdio.">{(id) => <Input id={id} mono value={command} onChange={(e) => setCommand(e.target.value)} />}</Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Default model" hint="Used when someone starts work without choosing a model.">
@@ -522,13 +522,13 @@ function General() {
       <Field
         label="Extra hosts every sandbox may reach"
         hint={data.egress_enforced
-          ? <>Sandboxes reach the internet only through Noemune’s allowlist. Always allowed: {data.egress_allow_builtin.join(", ")}, plus each harness’s own hosts.</>
+          ? <>Sandboxes reach the internet only through Hyperbeam’s allowlist. Always allowed: {data.egress_allow_builtin.join(", ")}, plus each harness’s own hosts.</>
           : undefined}
       >
         {(id) => <Textarea id={id} mono rows={4} value={form.egress} onChange={(e) => setForm({ ...form, egress: e.target.value })} placeholder="internal-registry.example.com" />}
       </Field>
       {!data.egress_enforced && (
-        <Notice tone="warning" title="Network access is not restricted">The egress proxy is not enabled on this installation, so Noemune does not limit where sandboxes connect. This list takes effect once it is.</Notice>
+        <Notice tone="warning" title="Network access is not restricted">The egress proxy is not enabled on this installation, so Hyperbeam does not limit where sandboxes connect. This list takes effect once it is.</Notice>
       )}
       <ErrorNote error={action.error} />
       <div className="flex items-center gap-3">
@@ -667,7 +667,7 @@ function Account() {
         </form>
       </AccountSection>
 
-      <AccountSection title="API keys" description={<>For the <code className="font-mono text-[12px]">noemune</code> command-line tool and your own scripts. A key acts as you.</>}>
+      <AccountSection title="API keys" description={<>For the <code className="font-mono text-[12px]">hyperbeam</code> command-line tool and your own scripts. A key acts as you.</>}>
         {newKey && (
           <Notice tone="success" title="Copy this key now. It will not be shown again.">
             <div className="mt-2"><CopyField value={newKey} /></div>

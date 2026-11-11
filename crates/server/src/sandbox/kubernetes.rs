@@ -2,7 +2,7 @@
 //!
 //! The harness image is whatever the profile names. The runner binary is
 //! copied in by an init container, so harness images need nothing
-//! Noemune-specific beyond `git` and the harness itself.
+//! Hyperbeam-specific beyond `git` and the harness itself.
 
 use super::{LaunchRequest, SandboxDriver};
 use crate::config::Config;
@@ -14,8 +14,8 @@ use kube::{Client, ResourceExt};
 use serde_json::json;
 use uuid::Uuid;
 
-const SESSION_LABEL: &str = "noemune.dev/session";
-const RUNNER_PATH: &str = "/noemune/bin/noemune-runner";
+const SESSION_LABEL: &str = "hyperbeam.dev/session";
+const RUNNER_PATH: &str = "/hyperbeam/bin/hyperbeam-runner";
 
 /// How agent pods are shaped; separate from the client so it can be tested.
 #[derive(Clone)]
@@ -59,9 +59,9 @@ fn pod_name(session_id: Uuid) -> String {
 pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_json::Value {
     let name = pod_name(request.session_id);
     let mut env = vec![
-        json!({ "name": "NOEMUNE_SERVER_URL", "value": request.server_url }),
-        json!({ "name": "NOEMUNE_RUN_TOKEN", "valueFrom": { "secretKeyRef": { "name": name, "key": "token" } } }),
-        json!({ "name": "NOEMUNE_WORKSPACE", "value": "/workspace" }),
+        json!({ "name": "HYPERBEAM_SERVER_URL", "value": request.server_url }),
+        json!({ "name": "HYPERBEAM_RUN_TOKEN", "valueFrom": { "secretKeyRef": { "name": name, "key": "token" } } }),
+        json!({ "name": "HYPERBEAM_WORKSPACE", "value": "/workspace" }),
         json!({ "name": "HOME", "value": "/home/agent" }),
     ];
     for (key, value) in &request.env {
@@ -77,8 +77,8 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
         "metadata": {
             "name": name,
             "labels": {
-                "app.kubernetes.io/managed-by": "noemune",
-                "noemune.dev/role": "agent",
+                "app.kubernetes.io/managed-by": "hyperbeam",
+                "hyperbeam.dev/role": "agent",
                 SESSION_LABEL: request.session_id.to_string(),
             },
         },
@@ -98,8 +98,8 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
                 "name": "runner",
                 "image": settings.runner_image,
                 "imagePullPolicy": settings.pull_policy,
-                "command": ["/noemune-runner", "install", RUNNER_PATH],
-                "volumeMounts": [{ "name": "noemune-bin", "mountPath": "/noemune/bin" }],
+                "command": ["/hyperbeam-runner", "install", RUNNER_PATH],
+                "volumeMounts": [{ "name": "hyperbeam-bin", "mountPath": "/hyperbeam/bin" }],
                 "securityContext": hardened,
                 "resources": { "limits": { "cpu": "200m", "memory": "64Mi" } },
             }],
@@ -111,7 +111,7 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
                 "workingDir": "/workspace",
                 "env": env,
                 "volumeMounts": [
-                    { "name": "noemune-bin", "mountPath": "/noemune/bin", "readOnly": true },
+                    { "name": "hyperbeam-bin", "mountPath": "/hyperbeam/bin", "readOnly": true },
                     { "name": "workspace", "mountPath": "/workspace" },
                     { "name": "home", "mountPath": "/home/agent" },
                     { "name": "tmp", "mountPath": "/tmp" },
@@ -123,7 +123,7 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
                 },
             }],
             "volumes": [
-                { "name": "noemune-bin", "emptyDir": {} },
+                { "name": "hyperbeam-bin", "emptyDir": {} },
                 { "name": "workspace", "emptyDir": { "sizeLimit": settings.workspace_size } },
                 { "name": "home", "emptyDir": { "sizeLimit": "2Gi" } },
                 { "name": "tmp", "emptyDir": { "sizeLimit": "2Gi" } },
@@ -155,7 +155,7 @@ impl SandboxDriver for KubernetesDriver {
             "metadata": {
                 "name": name,
                 "labels": {
-                    "app.kubernetes.io/managed-by": "noemune",
+                    "app.kubernetes.io/managed-by": "hyperbeam",
                     SESSION_LABEL: request.session_id.to_string(),
                 },
                 "ownerReferences": [{
@@ -194,7 +194,7 @@ impl SandboxDriver for KubernetesDriver {
 
     async fn list(&self) -> Result<Vec<Uuid>> {
         let pods: Api<Pod> = Api::namespaced(self.client.clone(), &self.namespace);
-        let list = pods.list(&ListParams::default().labels("noemune.dev/role=agent")).await?;
+        let list = pods.list(&ListParams::default().labels("hyperbeam.dev/role=agent")).await?;
         Ok(list
             .items
             .iter()
@@ -221,7 +221,7 @@ mod tests {
             session_id: Uuid::nil(),
             token: "nmr_secret".into(),
             image: "harness:1".into(),
-            server_url: "http://noemune:8080".into(),
+            server_url: "http://hyperbeam:8080".into(),
             env: Default::default(),
         };
         let manifest = pod_manifest(&settings, &request);

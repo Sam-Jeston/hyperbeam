@@ -7,9 +7,9 @@ use crate::error::{ApiError, ApiResult};
 use crate::sandbox::LaunchRequest;
 use crate::store::{self, Event, Harness, Session, User};
 use anyhow::{Context, Result, anyhow};
-use noemune_core::protocol::{HarnessSpec, RepoSpec, RunSpec, RunnerMsg, ServerMsg, SessionStatus, SkillSpec, event};
-use noemune_core::workflow::SessionRole;
-use noemune_core::{Grant, GrantSet};
+use hyperbeam_core::protocol::{HarnessSpec, RepoSpec, RunSpec, RunnerMsg, ServerMsg, SessionStatus, SkillSpec, event};
+use hyperbeam_core::workflow::SessionRole;
+use hyperbeam_core::{Grant, GrantSet};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -278,7 +278,7 @@ impl App {
         for name in &new.repos {
             let repo = store::repo_by_name(&self.db, name)
                 .await?
-                .ok_or_else(|| ApiError::bad(format!("repository `{name}` is not registered with Noemune")))?;
+                .ok_or_else(|| ApiError::bad(format!("repository `{name}` is not registered with Hyperbeam")))?;
             if !scope.allows(&repo.full_name) {
                 return Err(ApiError::forbidden(format!("you do not have access to `{}`", repo.full_name)));
             }
@@ -332,7 +332,7 @@ impl App {
         let short = &id.simple().to_string()[24..];
         let branch_slug = slug(&title);
         let work_branch =
-            if branch_slug.is_empty() { format!("noemune/{short}") } else { format!("noemune/{branch_slug}-{short}") };
+            if branch_slug.is_empty() { format!("hyperbeam/{short}") } else { format!("hyperbeam/{branch_slug}-{short}") };
 
         let session: Session = sqlx::query_as(&format!(
             "INSERT INTO sessions (id, workstream_id, parent_id, title, role, harness_id, created_by, workflow,
@@ -568,7 +568,7 @@ impl App {
             mcp_url: format!("{base}/mcp"),
             git_base_url: format!("{base}/git"),
             preamble,
-            git_user_name: format!("{} (via Noemune)", user.name),
+            git_user_name: format!("{} (via Hyperbeam)", user.name),
             git_user_email: user.email,
             work_branch: session.work_branch.clone(),
             probe: false,
@@ -578,7 +578,7 @@ impl App {
     async fn preamble(&self, session: &Session, user: &User, repos: &[RepoSpec], skills: &[SkillSpec]) -> Result<String> {
         let mut p = String::new();
         p.push_str(&format!(
-            "You are an agent running on Noemune, a platform where a team's agent work is visible to everyone on the team. \
+            "You are an agent running on Hyperbeam, a platform where a team's agent work is visible to everyone on the team. \
              You are working on behalf of {}. Teammates can watch this session live, so narrate decisions briefly and keep a current plan.\n\n",
             user.name
         ));
@@ -638,7 +638,7 @@ impl App {
             );
         }
         p.push_str(
-            "Tools from the `noemune` server are how you reach those systems. `noemune_memory_*` reads and writes the \
+            "Tools from the `hyperbeam` server are how you reach those systems. `hyperbeam_memory_*` reads and writes the \
              team's shared notes; record durable facts worth keeping for future sessions there.\n",
         );
 
@@ -652,7 +652,7 @@ impl App {
         let memory: Vec<(String,)> = sqlx::query_as("SELECT key FROM memory ORDER BY key LIMIT 100").fetch_all(&self.db).await?;
         if !memory.is_empty() {
             let keys: Vec<String> = memory.into_iter().map(|(k,)| format!("`{k}`")).collect();
-            p.push_str(&format!("\n## Team notes\nAvailable via `noemune_memory_read`: {}\n", keys.join(", ")));
+            p.push_str(&format!("\n## Team notes\nAvailable via `hyperbeam_memory_read`: {}\n", keys.join(", ")));
         }
 
         if session.role == "conductor" {
@@ -660,10 +660,10 @@ impl App {
                 "\n## You are a conductor\n\
                  Your job is to turn the request into a plan and delegate the building to worker agents, not to do \
                  all of it yourself. Scope the work first (read code, tickets and notes as needed), then:\n\
-                 - `noemune_spawn_agent` starts a worker with its own sandbox, repositories and prompt. Give each \
+                 - `hyperbeam_spawn_agent` starts a worker with its own sandbox, repositories and prompt. Give each \
                  worker a self-contained brief: it does not see this conversation.\n\
                  - End your turn after delegating. You will be prompted again each time a worker finishes a turn, with its summary.\n\
-                 - `noemune_list_agents` and `noemune_get_agent` show progress; `noemune_message_agent` sends a follow-up; `noemune_stop_agent` stops one.\n\
+                 - `hyperbeam_list_agents` and `hyperbeam_get_agent` show progress; `hyperbeam_message_agent` sends a follow-up; `hyperbeam_stop_agent` stops one.\n\
                  - Workers can hold at most the permissions you hold.\n\
                  When everything is done, report the outcome with links to any pull requests.\n",
             );
@@ -893,8 +893,8 @@ impl App {
             if matches!(parent.status.as_str(), "cancelled" | "failed") {
                 return;
             }
-            let text = format!("[Noemune] Worker agent “{}” (id {}) {what}", child.title, child.id);
-            if let Err(err) = self.send_input(&parent, None, "Noemune", &text).await {
+            let text = format!("[Hyperbeam] Worker agent “{}” (id {}) {what}", child.title, child.id);
+            if let Err(err) = self.send_input(&parent, None, "Hyperbeam", &text).await {
                 tracing::warn!("could not notify conductor {parent_id}: {err}");
             }
         })

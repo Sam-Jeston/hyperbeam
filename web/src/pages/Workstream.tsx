@@ -35,8 +35,8 @@ export function WorkstreamPage({ id }: { id: string }) {
 
   useEffect(() => {
     const onChange = (e: Event) => (e as CustomEvent).detail === id && reload();
-    window.addEventListener("noemune:workstream", onChange);
-    return () => window.removeEventListener("noemune:workstream", onChange);
+    window.addEventListener("hyperbeam:workstream", onChange);
+    return () => window.removeEventListener("hyperbeam:workstream", onChange);
   }, [id]);
 
   const sessions = useMemo(

@@ -1,7 +1,7 @@
 //! Development driver: each agent is a child process on the server's host.
 //!
 //! There is no isolation here. An agent can read anything the server's user
-//! can. Use it to try Noemune on a laptop; use Kubernetes for anything shared.
+//! can. Use it to try Hyperbeam on a laptop; use Kubernetes for anything shared.
 
 use super::{LaunchRequest, SandboxDriver};
 use anyhow::{Context, Result};
@@ -26,15 +26,15 @@ impl ProcessDriver {
             None => std::env::current_exe()?
                 .parent()
                 .context("cannot locate the server binary's directory")?
-                .join("noemune-runner"),
+                .join("hyperbeam-runner"),
         };
         if !runner_bin.exists() {
             anyhow::bail!(
-                "runner binary not found at {} (build it with `cargo build -p noemune-runner` or set NOEMUNE_RUNNER_BIN)",
+                "runner binary not found at {} (build it with `cargo build -p hyperbeam-runner` or set HYPERBEAM_RUNNER_BIN)",
                 runner_bin.display()
             );
         }
-        let root = root.unwrap_or_else(|| std::env::temp_dir().join("noemune-sandboxes"));
+        let root = root.unwrap_or_else(|| std::env::temp_dir().join("hyperbeam-sandboxes"));
         std::fs::create_dir_all(&root)?;
         Ok(Self { runner_bin, root, children: Mutex::default() })
     }
@@ -66,9 +66,9 @@ impl SandboxDriver for ProcessDriver {
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", &home)
             .env("LANG", "C.UTF-8")
-            .env("NOEMUNE_SERVER_URL", &request.server_url)
-            .env("NOEMUNE_RUN_TOKEN", &request.token)
-            .env("NOEMUNE_WORKSPACE", dir.join("workspace"))
+            .env("HYPERBEAM_SERVER_URL", &request.server_url)
+            .env("HYPERBEAM_RUN_TOKEN", &request.token)
+            .env("HYPERBEAM_WORKSPACE", dir.join("workspace"))
             .envs(&request.env)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log.try_clone()?))

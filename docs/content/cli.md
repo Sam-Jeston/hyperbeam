@@ -3,22 +3,22 @@ title: Command line
 description: Start, follow, message and stop agents from your terminal or CI.
 ---
 
-The `noemune` command talks to a Noemune server with an API key that acts as you, so agents started from the command line have exactly the permissions they would have from the UI.
+The `hyperbeam` command talks to a Hyperbeam server with an API key that acts as you, so agents started from the command line have exactly the permissions they would have from the UI.
 
 ## Sign in
 
 Create an API key under **Settings → My account → API keys**, then:
 
 ```bash
-noemune login --server https://noemune.example.com
+hyperbeam login --server https://hyperbeam.example.com
 ```
 
-You are asked for the key. `NOEMUNE_SERVER` and `NOEMUNE_API_KEY` in the environment take the place of `noemune login`, which is handy in CI. `noemune whoami` shows who you are signed in as.
+You are asked for the key. `HYPERBEAM_SERVER` and `HYPERBEAM_API_KEY` in the environment take the place of `hyperbeam login`, which is handy in CI. `hyperbeam whoami` shows who you are signed in as.
 
 ## Start an agent
 
 ```bash
-noemune run "Fix the flaky checkout test" --repo acme/web --model sonnet --follow
+hyperbeam run "Fix the flaky checkout test" --repo acme/web --model sonnet --follow
 ```
 
 | Option | Meaning |
@@ -35,7 +35,7 @@ noemune run "Fix the flaky checkout test" --repo acme/web --model sonnet --follo
 ## Run a workflow
 
 ```bash
-noemune workflow ship-feature -i feature="CSV export" --follow
+hyperbeam workflow ship-feature -i feature="CSV export" --follow
 ```
 
 | Option | Meaning |
@@ -48,12 +48,12 @@ noemune workflow ship-feature -i feature="CSV export" --follow
 ## Manage sessions
 
 ```bash
-noemune ls                     # sessions that are live now
-noemune ls --all --mine        # include finished ones; only yours
-noemune logs -f 3ff6c49b       # print a session's log, and keep following it
-noemune send 3ff6c49b "Also update the changelog" --follow
-noemune interrupt 3ff6c49b     # end the current turn, keep the session
-noemune stop 3ff6c49b          # stop it and tear down its sandbox
+hyperbeam ls                     # sessions that are live now
+hyperbeam ls --all --mine        # include finished ones; only yours
+hyperbeam logs -f 3ff6c49b       # print a session's log, and keep following it
+hyperbeam send 3ff6c49b "Also update the changelog" --follow
+hyperbeam interrupt 3ff6c49b     # end the current turn, keep the session
+hyperbeam stop 3ff6c49b          # stop it and tear down its sandbox
 ```
 
-A session id can be shortened to any part that matches only one session: its first characters, or its last. Ids start with a timestamp, so the last eight characters are usually the easiest to tell apart; `noemune ls` shows them.
+A session id can be shortened to any part that matches only one session: its first characters, or its last. Ids start with a timestamp, so the last eight characters are usually the easiest to tell apart; `hyperbeam ls` shows them.

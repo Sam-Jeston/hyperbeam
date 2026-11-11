@@ -240,7 +240,7 @@ function InviteDialog({ grants, onClose }: { grants: GrantInfo[]; onClose: () =>
   if (url) {
     return (
       <Modal title="Invite link ready" onClose={onClose} footer={<Button variant="primary" onClick={onClose}>Done</Button>}>
-        <p className="text-[13.5px]">Send this link to <strong className="font-semibold">{email}</strong>. Noemune does not send email itself.</p>
+        <p className="text-[13.5px]">Send this link to <strong className="font-semibold">{email}</strong>. Hyperbeam does not send email itself.</p>
         <CopyField value={url} label="Copy link" />
         <Notice tone="info">The link works once and expires in seven days. It will not be shown again.</Notice>
       </Modal>

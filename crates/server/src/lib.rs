@@ -1,4 +1,4 @@
-//! Noemune control plane.
+//! Hyperbeam control plane.
 
 pub mod api;
 pub mod app;
@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 /// Connect to the database, migrate, and assemble the application.
 pub async fn build(cfg: Config) -> Result<(App, Router)> {
-    let secrets = crypto::SecretBox::from_base64(&cfg.master_key).context("NOEMUNE_MASTER_KEY")?;
+    let secrets = crypto::SecretBox::from_base64(&cfg.master_key).context("HYPERBEAM_MASTER_KEY")?;
     // The database often starts alongside the server (same Helm release,
     // same compose file); wait for it rather than crash-looping.
     let options = PgPoolOptions::new().max_connections(20).acquire_timeout(std::time::Duration::from_secs(10));
@@ -39,7 +39,7 @@ pub async fn build(cfg: Config) -> Result<(App, Router)> {
                 tracing::info!("waiting for Postgres: {err}");
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
-            Err(err) => return Err(err).context("could not connect to Postgres (NOEMUNE_DATABASE_URL)"),
+            Err(err) => return Err(err).context("could not connect to Postgres (HYPERBEAM_DATABASE_URL)"),
         }
     };
     sqlx::migrate!("./migrations").run(&db).await.context("database migration failed")?;

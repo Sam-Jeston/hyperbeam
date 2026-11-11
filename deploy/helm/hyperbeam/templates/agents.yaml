@@ -1,4 +1,4 @@
-{{- $name := include "noemune.name" . }}
+{{- $name := include "hyperbeam.name" . }}
 # Where agent sandboxes run. The control plane may manage pods and their
 # token secrets here and nothing else in the cluster.
 apiVersion: v1
@@ -6,7 +6,7 @@ kind: Namespace
 metadata:
   name: {{ .Values.agents.namespace }}
   labels:
-    {{- include "noemune.labels" . | nindent 4 }}
+    {{- include "hyperbeam.labels" . | nindent 4 }}
     pod-security.kubernetes.io/enforce: restricted
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -14,7 +14,7 @@ kind: Role
 metadata:
   name: {{ $name }}-sandboxes
   namespace: {{ .Values.agents.namespace }}
-  labels: {{- include "noemune.labels" . | nindent 4 }}
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -28,7 +28,7 @@ kind: RoleBinding
 metadata:
   name: {{ $name }}-sandboxes
   namespace: {{ .Values.agents.namespace }}
-  labels: {{- include "noemune.labels" . | nindent 4 }}
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -46,11 +46,11 @@ kind: NetworkPolicy
 metadata:
   name: {{ $name }}-sandboxes
   namespace: {{ .Values.agents.namespace }}
-  labels: {{- include "noemune.labels" . | nindent 4 }}
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      noemune.dev/role: agent
+      hyperbeam.dev/role: agent
   policyTypes: ["Ingress", "Egress"]
   ingress: []
   egress:
@@ -59,7 +59,7 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Release.Namespace }}
           podSelector:
-            matchLabels: {{- include "noemune.selector" . | nindent 14 }}
+            matchLabels: {{- include "hyperbeam.selector" . | nindent 14 }}
       ports:
         - { protocol: TCP, port: 8080 }
         - { protocol: TCP, port: 8081 }

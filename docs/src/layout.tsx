@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight, ChevronRight, Menu, Moon, Pencil, Search, Sun, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { MARK_FILLS, MARK_LAYERS } from "../../brand/mark";
 import { REPO_URL, SITE_URL } from "./config";
 import { href, type Heading } from "./markdown";
 import { NAV } from "./nav";
@@ -14,11 +15,8 @@ export interface PageMeta {
 
 export function BrandMark({ size = 24, className }: { size?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 40 40" width={size} height={size} className={cx("shrink-0", className)} aria-hidden="true">
-      <circle cx="20" cy="20" r="16.5" fill="none" stroke="var(--primary)" strokeWidth="3" />
-      <circle cx="14.5" cy="21" r="5.2" fill="var(--primary)" />
-      <circle cx="25.5" cy="13.8" r="3.3" fill="var(--second)" />
-      <circle cx="25.8" cy="26.4" r="3.3" fill="var(--second)" />
+    <svg viewBox="0 0 16 16" width={size} height={size} shapeRendering="crispEdges" className={cx("shrink-0", className)} aria-hidden="true">
+      {MARK_FILLS.map(([layer, fill]) => <path key={layer} d={MARK_LAYERS[layer]} fill={fill} />)}
     </svg>
   );
 }
@@ -40,9 +38,9 @@ function Header() {
         <button type="button" data-sidebar-open className="-ml-1.5 grid size-9 place-items-center rounded-md text-muted hover:bg-surface-2 lg:hidden" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
           <Menu className="size-5" />
         </button>
-        <a href={pageHref("")} className="flex items-center gap-2" aria-label="Noemune docs home">
+        <a href={pageHref("")} className="flex items-center gap-2" aria-label="Hyperbeam docs home">
           <BrandMark size={24} />
-          <span className="font-display text-[18px] font-bold tracking-[-0.035em]">noemune</span>
+          <span className="font-display text-[18px] font-bold tracking-[-0.035em]">hyperbeam</span>
           <span className="rounded-md bg-accent px-1.5 py-0.5 text-[11.5px] font-semibold text-accent-foreground">Docs</span>
         </a>
         <button
@@ -207,7 +205,7 @@ export function DocPage(props: {
           </div>
           {props.editPath && REPO_URL && (
             <div className="mt-14 border-t border-border pt-5 text-[13px]">
-              <a href={`${REPO_URL}/edit/${process.env.NOEMUNE_REPO_BRANCH ?? "main"}/docs/content/${props.editPath}`} className="inline-flex items-center gap-1.5 text-muted hover:text-foreground">
+              <a href={`${REPO_URL}/edit/${process.env.HYPERBEAM_REPO_BRANCH ?? "main"}/docs/content/${props.editPath}`} className="inline-flex items-center gap-1.5 text-muted hover:text-foreground">
                 <Pencil className="size-3.5" /> Edit this page
               </a>
             </div>

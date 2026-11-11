@@ -55,7 +55,7 @@ function Setup() {
     });
   };
   return (
-    <AuthCard title="Set up Noemune" description="You are the first person here, so you will own this installation. Invite the rest of your team once you are in." onSubmit={submit}>
+    <AuthCard title="Set up Hyperbeam" description="You are the first person here, so you will own this installation. Invite the rest of your team once you are in." onSubmit={submit}>
       <Field label="Team name">{(id) => <Input id={id} required autoFocus placeholder="Acme" {...field("team_name")} />}</Field>
       <Field label="Your name">{(id) => <Input id={id} required autoComplete="name" {...field("name")} />}</Field>
       <Field label="Email">{(id) => <Input id={id} type="email" required autoComplete="email" {...field("email")} />}</Field>

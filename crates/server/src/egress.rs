@@ -9,7 +9,7 @@ use crate::app::App;
 use crate::store;
 use anyhow::Result;
 use base64::Engine;
-use noemune_core::protocol::event;
+use hyperbeam_core::protocol::event;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -57,7 +57,7 @@ fn parse_request(head: &str) -> Result<ConnectRequest, &'static str> {
 }
 
 async fn reply(stream: &mut TcpStream, status: &str, message: &str) {
-    let extra = if status.starts_with("407") { "Proxy-Authenticate: Basic realm=\"noemune\"\r\n" } else { "" };
+    let extra = if status.starts_with("407") { "Proxy-Authenticate: Basic realm=\"hyperbeam\"\r\n" } else { "" };
     let response = format!(
         "HTTP/1.1 {status}\r\n{extra}Content-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{message}",
         message.len()
@@ -78,7 +78,7 @@ async fn serve(app: App, mut stream: TcpStream) -> Result<()> {
             break pos + 4;
         }
         if buf.len() > 16 * 1024 {
-            reply(&mut stream, "431 Request Header Fields Too Large", "noemune: request too large\n").await;
+            reply(&mut stream, "431 Request Header Fields Too Large", "hyperbeam: request too large\n").await;
             return Ok(());
         }
     };
@@ -86,12 +86,12 @@ async fn serve(app: App, mut stream: TcpStream) -> Result<()> {
     let request = match parse_request(&head) {
         Ok(request) => request,
         Err(why) => {
-            reply(&mut stream, "405 Method Not Allowed", &format!("noemune egress proxy: {why}\n")).await;
+            reply(&mut stream, "405 Method Not Allowed", &format!("hyperbeam egress proxy: {why}\n")).await;
             return Ok(());
         }
     };
     let Some(token) = request.token else {
-        reply(&mut stream, "407 Proxy Authentication Required", "noemune egress proxy: session credential required\n").await;
+        reply(&mut stream, "407 Proxy Authentication Required", "hyperbeam egress proxy: session credential required\n").await;
         return Ok(());
     };
     // A model-discovery probe is not a session, but its harness may reach
@@ -102,7 +102,7 @@ async fn serve(app: App, mut stream: TcpStream) -> Result<()> {
         None => match app.probes.by_token(&token) {
             Some(probe) => probe.harness_id,
             None => {
-                reply(&mut stream, "407 Proxy Authentication Required", "noemune egress proxy: unknown or ended session\n").await;
+                reply(&mut stream, "407 Proxy Authentication Required", "hyperbeam egress proxy: unknown or ended session\n").await;
                 return Ok(());
             }
         },
@@ -132,14 +132,14 @@ async fn serve(app: App, mut stream: TcpStream) -> Result<()> {
         } else {
             tracing::info!("model discovery for harness {harness_id}: egress to {target} denied");
         }
-        reply(&mut stream, "403 Forbidden", &format!("noemune egress proxy: {target} is not on the allowlist\n")).await;
+        reply(&mut stream, "403 Forbidden", &format!("hyperbeam egress proxy: {target} is not on the allowlist\n")).await;
         return Ok(());
     }
 
     let mut upstream = match TcpStream::connect((request.host.as_str(), request.port)).await {
         Ok(upstream) => upstream,
         Err(err) => {
-            reply(&mut stream, "502 Bad Gateway", &format!("noemune egress proxy: {err}\n")).await;
+            reply(&mut stream, "502 Bad Gateway", &format!("hyperbeam egress proxy: {err}\n")).await;
             return Ok(());
         }
     };

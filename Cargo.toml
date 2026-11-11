@@ -7,10 +7,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
-repository = "https://github.com/noemune/noemune"
+repository = "https://github.com/hyperbeam/hyperbeam"
 
 [workspace.dependencies]
-noemune-core = { path = "crates/core" }
+hyperbeam-core = { path = "crates/core" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

@@ -10,7 +10,7 @@ A **conductor** is an agent that coordinates other agents. Give it a request tha
 In **New work**, choose **Conductor** instead of **One agent**. From the command line:
 
 ```bash
-noemune run "Add dark mode" --conductor --repo acme/api --repo acme/web --workstream "Dark mode"
+hyperbeam run "Add dark mode" --conductor --repo acme/api --repo acme/web --workstream "Dark mode"
 ```
 
 ## What its workers may do

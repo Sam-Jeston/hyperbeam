@@ -1,6 +1,6 @@
 ---
 title: Development
-description: Build Noemune from source, run the tests, and work on the web app, landing page and docs.
+description: Build Hyperbeam from source, run the tests, and work on the web app, landing page and docs.
 ---
 
 ## Repository layout
@@ -11,7 +11,7 @@ description: Build Noemune from source, run the tests, and work on the web app, 
 | `crates/server` | API, session manager, tool gateway, git proxy, egress proxy, sandbox drivers. |
 | `crates/runner` | The in-sandbox runner and ACP client. |
 | `crates/test-agent` | A scripted ACP agent used by the end-to-end tests. Not shipped. |
-| `crates/cli` | The `noemune` command. |
+| `crates/cli` | The `hyperbeam` command. |
 | `web` | The product UI (React, Radix, Tailwind), embedded in the server binary. |
 | `site` | The landing page. |
 | `docs` | These docs. |
@@ -22,12 +22,12 @@ description: Build Noemune from source, run the tests, and work on the web app, 
 ## Build and test
 
 ```bash
-cargo build -p noemune-runner -p noemune-test-agent
-NOEMUNE_TEST_DATABASE_URL=postgres://noemune:noemune@127.0.0.1:5440/postgres cargo test --workspace
+cargo build -p hyperbeam-runner -p hyperbeam-test-agent
+HYPERBEAM_TEST_DATABASE_URL=postgres://hyperbeam:hyperbeam@127.0.0.1:5440/postgres cargo test --workspace
 (cd web && bun run typecheck && bun run build)
 ```
 
-The end-to-end tests need Postgres. Without `NOEMUNE_TEST_DATABASE_URL` they are skipped.
+The end-to-end tests need Postgres. Without `HYPERBEAM_TEST_DATABASE_URL` they are skipped.
 
 ## The web app
 
@@ -50,7 +50,7 @@ cd site && bun install && bun run dev    # http://localhost:4321, with the docs 
 
 `bun run build` in each writes `dist/`. Docs pages are Markdown files in `docs/content/`, listed in order in `docs/src/nav.ts`. The build fails on a link to a page or heading that doesn’t exist.
 
-They link to each other by path: the docs expect to be served at `/docs` beside the landing page. Override this at build time with `NOEMUNE_DOCS_BASE`, `NOEMUNE_SITE_URL` and `NOEMUNE_DOCS_URL`. Set `NOEMUNE_REPO_URL` to show links to the source and “Edit this page”.
+They link to each other by path: the docs expect to be served at `/docs` beside the landing page. Override this at build time with `HYPERBEAM_DOCS_BASE`, `HYPERBEAM_SITE_URL` and `HYPERBEAM_DOCS_URL`. Set `HYPERBEAM_REPO_URL` to show links to the source and “Edit this page”.
 
 ## Brand
 

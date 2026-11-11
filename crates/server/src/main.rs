@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
-use noemune_server::config::Config;
-use noemune_server::{build, crypto, egress};
+use hyperbeam_server::config::Config;
+use hyperbeam_server::{build, crypto, egress};
 
 #[derive(Parser)]
-#[command(name = "noemune-server", version, about = "Noemune control plane")]
+#[command(name = "hyperbeam-server", version, about = "Hyperbeam control plane")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -13,7 +13,7 @@ struct Cli {
 enum Command {
     /// Run the control plane.
     Serve(Box<Config>),
-    /// Print a new master key for NOEMUNE_MASTER_KEY.
+    /// Print a new master key for HYPERBEAM_MASTER_KEY.
     GenKey,
 }
 
@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
                 tokio::spawn(egress::run(app.clone(), listener));
             }
             let listener = tokio::net::TcpListener::bind(&listen).await?;
-            tracing::info!("noemune listening on {listen} (sandbox driver: {})", app.driver.name());
+            tracing::info!("hyperbeam listening on {listen} (sandbox driver: {})", app.driver.name());
             axum::serve(listener, router)
                 .with_graceful_shutdown(async {
                     tokio::signal::ctrl_c().await.ok();

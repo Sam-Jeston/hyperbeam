@@ -8,7 +8,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-theme-toggle]").forEach((but
     const next = root.classList.contains("light") ? "dark" : "light";
     root.className = next;
     try {
-      localStorage.setItem("noemune:theme", next);
+      localStorage.setItem("hyperbeam:theme", next);
     } catch {
       // Private windows may refuse; the choice still applies on this page.
     }

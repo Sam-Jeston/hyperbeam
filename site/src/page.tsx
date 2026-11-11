@@ -3,6 +3,7 @@ import {
   Network, NotebookPen, ScrollText, Server, ShieldCheck, ShieldX, Sun, Terminal, Users, Workflow,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { MARK_FILLS, MARK_LAYERS } from "../../brand/mark";
 import { docs, REPO_URL } from "./config";
 import { highlight } from "./highlight";
 
@@ -12,17 +13,14 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 
 export function BrandMark({ size = 24, className }: { size?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 40 40" width={size} height={size} className={cx("shrink-0", className)} aria-hidden="true">
-      <circle cx="20" cy="20" r="16.5" fill="none" stroke="var(--primary)" strokeWidth="3" />
-      <circle cx="14.5" cy="21" r="5.2" fill="var(--primary)" />
-      <circle cx="25.5" cy="13.8" r="3.3" fill="var(--second)" />
-      <circle cx="25.8" cy="26.4" r="3.3" fill="var(--second)" />
+    <svg viewBox="0 0 16 16" width={size} height={size} shapeRendering="crispEdges" className={cx("shrink-0", className)} aria-hidden="true">
+      {MARK_FILLS.map(([layer, fill]) => <path key={layer} d={MARK_LAYERS[layer]} fill={fill} />)}
     </svg>
   );
 }
 
 function Wordmark({ className }: { className?: string }) {
-  return <span className={cx("font-display font-bold tracking-[-0.035em]", className)}>noemune</span>;
+  return <span className={cx("font-display font-bold tracking-[-0.035em]", className)}>hyperbeam</span>;
 }
 
 function GitHubIcon({ className }: { className?: string }) {
@@ -99,7 +97,7 @@ function Nav() {
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-[1160px] items-center gap-6 px-4 sm:px-8">
-        <a href="/" className="flex items-center gap-2.5" aria-label="Noemune home">
+        <a href="/" className="flex items-center gap-2.5" aria-label="Hyperbeam home">
           <BrandMark size={26} />
           <Wordmark className="text-[19px]" />
         </a>
@@ -133,9 +131,9 @@ function Nav() {
 function Hero() {
   return (
     <section className="relative overflow-hidden px-4 pt-16 pb-20 sm:px-8 sm:pt-24 sm:pb-28">
-      <div aria-hidden="true" className="agar pointer-events-none absolute inset-0" />
-      <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[18%] size-[900px] -translate-x-1/2 rounded-full border border-primary/12" />
+      <div aria-hidden="true" className="dot-grid pointer-events-none absolute inset-0" />
       <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[28%] size-[640px] -translate-x-1/2 rounded-full bg-primary/10 blur-[120px]" />
+      <HeroBeam />
       <div className="relative mx-auto max-w-[1160px]">
         <div className="mx-auto grid max-w-[820px] justify-items-center gap-6 text-center">
           <a href={docs("concepts")} className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface/70 py-1 pr-3 pl-1.5 text-[13px] text-muted backdrop-blur hover:text-foreground">
@@ -160,7 +158,16 @@ function Hero() {
   );
 }
 
-/** A session as it appears in Noemune. The script plays it step by step; without it, it reads as a finished session. */
+/** The mark scaled up so each pixel is a block, fired into the hero from its top right corner. Wide screens only, where it clears the headline. */
+function HeroBeam() {
+  return (
+    <svg viewBox="0 0 16 16" shapeRendering="crispEdges" aria-hidden="true" className="hero-beam pointer-events-none absolute top-6 right-[max(-24px,calc(50%-720px))] hidden size-[320px] lg:block xl:size-[384px]">
+      {MARK_FILLS.map(([layer, fill]) => <path key={layer} d={MARK_LAYERS[layer]} fill={fill} />)}
+    </svg>
+  );
+}
+
+/** A session as it appears in Hyperbeam. The script plays it step by step; without it, it reads as a finished session. */
 function ProductDemo() {
   const step = (n: number) => ({ "data-step": n });
   return (
@@ -182,7 +189,7 @@ function ProductDemo() {
           </div>
           <Tool {...step(2)} icon={<FileText />} title="Read crates/server/src/api/audit.rs" />
           <Tool {...step(3)} icon={<FilePen />} title="Edit crates/server/src/api/audit.rs" diff="+64 −3" />
-          <Tool {...step(4)} icon={<Terminal />} title="cargo test -p noemune-server" />
+          <Tool {...step(4)} icon={<Terminal />} title="cargo test -p hyperbeam-server" />
           <Gate {...step(5)} allowed text="github: push to nm/audit-csv" />
           <Gate {...step(6)} allowed={false} text="egress to pastebin.com" />
           <div {...step(7)} className="text-[14px] leading-relaxed">
@@ -300,7 +307,7 @@ function HowItWorks() {
   return (
     <Section id="how">
       <SectionHead eyebrow="How it works" title="Agent work, moved out of one person’s terminal">
-        Most agent work happens on someone’s laptop and stays invisible until a pull request appears. Noemune moves it one level up, where the whole team can see it.
+        Most agent work happens on someone’s laptop and stays invisible until a pull request appears. Hyperbeam moves it one level up, where the whole team can see it.
       </SectionHead>
       <ol className="grid gap-4 md:grid-cols-3">
         {steps.map((s, i) => (
@@ -330,7 +337,7 @@ function Features() {
   return (
     <Section className="bg-surface/30">
       <SectionHead eyebrow="For the whole team" title="Everything around the agent, in one place">
-        Noemune doesn’t replace your coding agent. It gives it a place to work that your team can see, steer and trust.
+        Hyperbeam doesn’t replace your coding agent. It gives it a place to work that your team can see, steer and trust.
       </SectionHead>
       <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
         {items.map((f) => (
@@ -357,14 +364,14 @@ function Security() {
   return (
     <Section id="security">
       <SectionHead eyebrow="Security" title="Agents never hold your credentials">
-        A sandbox holds exactly one secret: a run token that identifies its session, revoked the moment the session ends. Everything it does outside the sandbox goes through Noemune, which checks it and records it.
+        A sandbox holds exactly one secret: a run token that identifies its session, revoked the moment the session ends. Everything it does outside the sandbox goes through Hyperbeam, which checks it and records it.
       </SectionHead>
 
       <div className="grid items-stretch gap-3 lg:grid-cols-[1fr_auto_1.25fr_auto_1fr]">
-        <DiagramBox title="Agent sandbox" tone="muted" items={["Your harness, over ACP", "noemune-runner", "One run token. No keys."]} icon={<ScrollText />} />
+        <DiagramBox title="Agent sandbox" tone="muted" items={["Your harness, over ACP", "hyperbeam-runner", "One run token. No keys."]} icon={<ScrollText />} />
         <Arrow />
         <DiagramBox
-          title="Noemune control plane"
+          title="Hyperbeam control plane"
           tone="primary"
           icon={<ShieldCheck />}
           items={["Tool gateway (MCP): checks the grant for every call", "Git proxy: clone and push, per repository", "Egress allowlist: everything else on the network", "Audit log: allowed, failed and blocked"]}
@@ -439,11 +446,11 @@ prompt: |
   Open a pull request per repository and report the links.
 `;
 
-const CLI = `noemune run "Fix the flaky checkout test" --repo acme/web --model sonnet --follow
-noemune workflow ship-feature -i feature="CSV export" --follow
-noemune ls
-noemune send 3ff6c49b "Also update the changelog" --follow
-noemune stop 3ff6c49b
+const CLI = `hyperbeam run "Fix the flaky checkout test" --repo acme/web --model sonnet --follow
+hyperbeam workflow ship-feature -i feature="CSV export" --follow
+hyperbeam ls
+hyperbeam send 3ff6c49b "Also update the changelog" --follow
+hyperbeam stop 3ff6c49b
 `;
 
 function Repeatable() {
@@ -483,10 +490,10 @@ function Repeatable() {
   );
 }
 
-const HELM = `helm install noemune deploy/helm/noemune \\
-  --namespace noemune --create-namespace \\
+const HELM = `helm install hyperbeam deploy/helm/hyperbeam \\
+  --namespace hyperbeam --create-namespace \\
   --set masterKey="$(openssl rand -base64 32)" \\
-  --set publicUrl=https://noemune.example.com`;
+  --set publicUrl=https://hyperbeam.example.com`;
 
 function SelfHost() {
   const points: [ReactNode, string, string][] = [
@@ -500,7 +507,7 @@ function SelfHost() {
       <div className="grid gap-12 lg:grid-cols-2">
         <div className="min-w-0">
           <SectionHead eyebrow="Self-hosted" title="One Helm chart. Runs where your code does.">
-            Noemune is open source under the Apache 2.0 license. Try it on a laptop in a few minutes, then install it on Kubernetes for the team.
+            Hyperbeam is open source under the Apache 2.0 license. Try it on a laptop in a few minutes, then install it on Kubernetes for the team.
           </SectionHead>
           <CodeBlock code={HELM} lang="bash" title="Install" />
           <div className="mt-5 flex flex-wrap gap-3">
@@ -548,9 +555,10 @@ function Status() {
 function FinalCta() {
   return (
     <section className="relative overflow-hidden border-t border-border px-4 py-24 sm:px-8">
-      <div aria-hidden="true" className="agar pointer-events-none absolute inset-0" />
+      <div aria-hidden="true" className="dot-grid pointer-events-none absolute inset-0" />
       <div className="relative mx-auto grid max-w-[640px] justify-items-center gap-5 text-center">
-        <BrandMark size={44} />
+        <BrandMark size={48} />
+        <p className="font-display text-[15px] font-semibold tracking-[-0.01em] text-primary">Because it’s the best move.</p>
         <h2 className="font-display text-[32px] font-semibold leading-tight tracking-[-0.03em] sm:text-[42px]">Give your agents a place the team can see.</h2>
         <p className="text-[16px] text-muted">Run it on your laptop and connect your first agent in a few minutes.</p>
         <div className="flex flex-wrap justify-center gap-3">
@@ -573,6 +581,7 @@ function Footer() {
       <div className="mx-auto grid max-w-[1160px] gap-10 md:grid-cols-[1.4fr_repeat(3,1fr)]">
         <div className="grid content-start gap-3">
           <a href="/" className="flex items-center gap-2"><BrandMark size={22} /><Wordmark className="text-[17px]" /></a>
+          <p className="font-display text-[14px] font-semibold text-primary">Because it’s the best move.</p>
           <p className="max-w-[34ch] text-[13.5px] text-muted">A self-hosted platform where a team’s coding agents work in the open.</p>
           <p className="text-[12.5px] text-faint">Apache License 2.0</p>
         </div>

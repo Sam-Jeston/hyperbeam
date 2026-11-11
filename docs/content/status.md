@@ -1,6 +1,6 @@
 ---
 title: Testing and limits
-description: How Noemune is tested, and the limits to know about.
+description: How Hyperbeam is tested, and the limits to know about.
 ---
 
 ## Automated tests

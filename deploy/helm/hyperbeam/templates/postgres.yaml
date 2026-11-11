@@ -2,8 +2,8 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "noemune.name" . }}-postgres
-  labels: {{- include "noemune.labels" . | nindent 4 }}
+  name: {{ include "hyperbeam.name" . }}-postgres
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
 spec:
   clusterIP: None
   selector:
@@ -15,10 +15,10 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "noemune.name" . }}-postgres
-  labels: {{- include "noemune.labels" . | nindent 4 }}
+  name: {{ include "hyperbeam.name" . }}-postgres
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
 spec:
-  serviceName: {{ include "noemune.name" . }}-postgres
+  serviceName: {{ include "hyperbeam.name" . }}-postgres
   replicas: 1
   selector:
     matchLabels:
@@ -27,7 +27,7 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: noemune
+        app.kubernetes.io/name: hyperbeam
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: postgres
     spec:
@@ -36,13 +36,13 @@ spec:
           image: {{ .Values.postgres.image }}
           env:
             - name: POSTGRES_USER
-              value: noemune
+              value: hyperbeam
             - name: POSTGRES_DB
-              value: noemune
+              value: hyperbeam
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "noemune.secretName" . }}
+                  name: {{ include "hyperbeam.secretName" . }}
                   key: postgres-password
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
@@ -50,7 +50,7 @@ spec:
             - containerPort: 5432
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "noemune"]
+              command: ["pg_isready", "-U", "hyperbeam"]
             periodSeconds: 5
           volumeMounts:
             - name: data

@@ -24,7 +24,7 @@ export async function build() {
   // Import fresh each build so `bun run dev` picks up edits.
   const { Page } = await import(`./src/page.tsx?${Date.now()}`);
   const body = renderToStaticMarkup(Page());
-  const title = "Noemune · Your team’s coding agents, working in the open";
+  const title = "Hyperbeam · Your team’s coding agents, working in the open";
   const description = "A self-hosted platform where a team’s coding agents work in the open. Any ACP agent, permissions that belong to people, and agents that never hold your credentials.";
   const html = `<!doctype html>
 <html lang="en" class="dark">

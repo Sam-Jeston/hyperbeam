@@ -45,7 +45,7 @@ pub struct SecretBox {
 }
 
 impl SecretBox {
-    /// `key` is 32 bytes, base64 encoded (`noemune-server gen-key`).
+    /// `key` is 32 bytes, base64 encoded (`hyperbeam-server gen-key`).
     pub fn from_base64(key: &str) -> Result<Self> {
         let bytes = STANDARD
             .decode(key.trim())

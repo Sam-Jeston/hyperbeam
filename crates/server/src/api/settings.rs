@@ -6,7 +6,7 @@ use crate::store::{self, CredentialSlot, Harness, ModelChoice, Repo, Skill, Work
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::{DateTime, Utc};
-use noemune_core::workflow::{WorkflowSpec, valid_repo, valid_slug};
+use hyperbeam_core::workflow::{WorkflowSpec, valid_repo, valid_slug};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -391,7 +391,7 @@ fn valid_env_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
         && !name.starts_with(|c: char| c.is_ascii_digit())
         // The runner's own wiring is not for profiles to override.
-        && !name.starts_with("NOEMUNE_")
+        && !name.starts_with("HYPERBEAM_")
         && !name.starts_with("GIT_CONFIG_")
 }
 
