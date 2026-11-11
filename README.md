@@ -251,6 +251,9 @@ smart-HTTP protocol, and need Postgres; without `NOEMUNE_TEST_DATABASE_URL` they
 | `crates/runner` | in-sandbox runner; ACP client; mock harness |
 | `crates/cli` | the `noemune` command |
 | `web` | the UI (React, built with Bun) |
+| `site` | the landing page, rendered to static HTML (`bun run dev` in `site/`) |
+| `docs` | the documentation: Markdown in `docs/content/`, rendered to static HTML |
+| `brand` | brand tokens and guidelines shared by `web`, `site` and `docs` |
 | `deploy` | Dockerfiles and the Helm chart |
 
 ## What is and is not verified

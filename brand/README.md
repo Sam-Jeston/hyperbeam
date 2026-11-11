@@ -3,12 +3,21 @@
 Every agent works in its own sealed dish, and the team watches what it does. The UI should feel like a
 calm, well-lit lab: precise and observant, but approachable for people who never open a terminal.
 
-Read this before changing anything visual. Tokens live in `src/app.css`, components in
-`src/components/ui/`, app-level pieces (status, avatars, page layout) in `src/lib/ui.tsx`.
+Read this before changing anything visual. It applies to all three web properties:
+
+| Path | What | Built with |
+|---|---|---|
+| `brand/tokens.css` | colors (both themes), fonts, radii, shadows, motion. The only place colors are defined | imported by each app's CSS |
+| `brand/build.ts` | font copying, theme-before-paint script, favicon | each app's `build.ts` |
+| `web/` | the product (embedded in the server) | React, Radix, Tailwind; kit in `web/src/components/ui/` |
+| `site/` | the public landing page | React rendered to static HTML at build time, Tailwind |
+| `docs/` | the documentation | Markdown in `docs/content/`, rendered to static HTML, Tailwind |
+
+In `web/`, app-level pieces (status, avatars, page layout) live in `web/src/lib/ui.tsx`.
 
 ## Mark
 
-`<BrandMark />` (`components/ui/brand.tsx`): a ring (the sandbox) holding a violet nucleus (the agent)
+`<BrandMark />` (`web/src/components/ui/brand.tsx`; the same SVG is in `site/` and `docs/`): a ring (the sandbox) holding a violet nucleus (the agent)
 and two pink helpers. The wordmark is lowercase **noemune** in Bricolage Grotesque Bold, tracked tight.
 Keep the mark in the theme colors; never recolor it to a status color.
 

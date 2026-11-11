@@ -208,7 +208,7 @@ function Repositories({ isAdmin }: { isAdmin: boolean }) {
   const remove = async (repo: Repo) => {
     const ok = await confirm({
       title: `Remove ${repo.full_name}?`,
-      description: "Agents can no longer reach it. Running sessions that use it lose access straight away. The repository itself is untouched.",
+      description: "New agents can no longer use it. Agents already running keep the repositories they started with until they stop. The repository itself is untouched.",
       confirmLabel: "Remove",
       destructive: true,
     });

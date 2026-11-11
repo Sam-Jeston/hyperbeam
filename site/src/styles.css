@@ -1,0 +1,30 @@
+/* Landing page. Brand tokens, fonts and base styles come from brand/tokens.css. */
+
+@import "tailwindcss";
+@import "../../brand/tokens.css";
+
+@layer base {
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+  body { font-size: 15px; }
+}
+
+@layer components {
+  /* Agar: a faint dot field, the texture of the dish. */
+  .agar {
+    background-image: radial-gradient(color-mix(in srgb, var(--foreground) 9%, transparent) 1px, transparent 1.2px);
+    background-size: 22px 22px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, black 30%, transparent 75%);
+  }
+  .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--primary); }
+
+  /* Highlighted code from Shiki. */
+  .code pre { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; overflow-x: auto; padding: 16px 18px; margin: 0; }
+  .code pre code { font-family: inherit; }
+
+  /* The hero demo plays once the script is running; without it, everything shows. */
+  .demo-live [data-step] { opacity: 0; transform: translateY(4px); transition: opacity 260ms ease, transform 260ms ease; }
+  .demo-live [data-step].shown { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .demo-live [data-step] { opacity: 1; transform: none; }
+  }
+}

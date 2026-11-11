@@ -4,3 +4,5 @@ node_modules
 .env
 *.pem
 .noemune-dev
+/site/dist
+/docs/dist

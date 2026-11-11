@@ -3,3 +3,5 @@ target
 web/dist
 .git
 .noemune-dev
+site/dist
+docs/dist

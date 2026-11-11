@@ -8,6 +8,7 @@ FROM oven/bun:1 AS web
 WORKDIR /src/web
 COPY web/package.json web/bun.lock* ./
 RUN bun install --frozen-lockfile
+COPY brand/ /src/brand/
 COPY web/ ./
 RUN bun run build
 
