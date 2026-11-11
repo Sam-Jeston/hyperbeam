@@ -1,0 +1,11 @@
+Noemune is starting.
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "noemune.name" . }} 8080:{{ .Values.service.port }}
+
+Then open {{ .Values.publicUrl }} and create your team: the first person in becomes its owner.
+
+Agent sandboxes run in the "{{ .Values.agents.namespace }}" namespace.
+{{- if .Values.egress.enforce }}
+Sandbox network access is limited to Noemune's egress allowlist. This relies
+on your CNI enforcing NetworkPolicy.
+{{- end }}

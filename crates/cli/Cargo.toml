@@ -1,0 +1,27 @@
+[package]
+name = "noemune-cli"
+description = "Command-line client for a Noemune server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "noemune"
+path = "src/main.rs"
+
+[dependencies]
+noemune-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+clap.workspace = true
+reqwest.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

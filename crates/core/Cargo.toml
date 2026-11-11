@@ -1,0 +1,18 @@
+[package]
+name = "noemune-core"
+description = "Shared domain types for Noemune: permissions, events, runner protocol, workflows"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

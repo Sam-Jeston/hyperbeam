@@ -1,0 +1,28 @@
+# Paste into Library → Workflows → New workflow.
+name: ship-feature
+description: Build a feature across repositories and open pull requests
+role: conductor
+# model: opus                 # defaults to the harness profile's default
+repos:
+  - acme/api
+  - acme/web
+grants:
+  - github:write
+  - github:open_pr
+  - linear:read
+inputs:
+  - name: feature
+    description: What to build, and how you will know it works
+  - name: ticket
+    description: Linear issue to read for context, e.g. ENG-123
+    required: false
+prompt: |
+  Build this feature: {{feature}}
+  Related ticket (may be empty): {{ticket}}
+
+  1. Scope it: read the relevant code in each repository, the ticket if there is one,
+     and the team notes. Write a short plan.
+  2. Delegate each repository's changes to its own worker agent with a complete brief,
+     including the contract between the pieces (endpoints, types, flags).
+  3. When workers report, check their pull requests fit together. Send follow-ups where they do not.
+  4. Move the workstream to review and report the pull request links.

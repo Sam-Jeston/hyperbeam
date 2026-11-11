@@ -1,0 +1,139 @@
+{{- $name := include "noemune.name" . }}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "noemune.labels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "noemune.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "noemune.selector" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+    - name: egress
+      port: 8081
+      targetPort: egress
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "noemune.labels" . | nindent 4 }}
+spec:
+  # One replica: live session state is held in memory. A restart is safe;
+  # running sandboxes reconnect on their own.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "noemune.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "noemune.selector" . | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          env:
+            - name: NOEMUNE_DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ include "noemune.secretName" . }}, key: database-url }
+            - name: NOEMUNE_MASTER_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ include "noemune.secretName" . }}, key: master-key }
+            - name: NOEMUNE_LISTEN
+              value: "0.0.0.0:8080"
+            - name: NOEMUNE_PUBLIC_URL
+              value: {{ .Values.publicUrl | quote }}
+            - name: NOEMUNE_INTERNAL_URL
+              value: "http://{{ include "noemune.serviceHost" . }}:{{ .Values.service.port }}"
+            - name: NOEMUNE_EGRESS_LISTEN
+              value: "0.0.0.0:8081"
+            {{- if .Values.egress.enforce }}
+            - name: NOEMUNE_EGRESS_ADDR
+              value: "{{ include "noemune.serviceHost" . }}:8081"
+            {{- end }}
+            - name: NOEMUNE_EGRESS_ALLOW
+              value: {{ join "," .Values.egress.allow | quote }}
+            - name: NOEMUNE_SANDBOX_DRIVER
+              value: kubernetes
+            - name: NOEMUNE_K8S_NAMESPACE
+              value: {{ .Values.agents.namespace | quote }}
+            - name: NOEMUNE_RUNNER_IMAGE
+              value: "{{ .Values.agents.runnerImage.repository }}:{{ .Values.agents.runnerImage.tag | default .Chart.AppVersion }}"
+            - name: NOEMUNE_K8S_IMAGE_PULL_POLICY
+              value: {{ .Values.agents.imagePullPolicy | quote }}
+            - name: NOEMUNE_K8S_CPU_LIMIT
+              value: {{ .Values.agents.cpuLimit | quote }}
+            - name: NOEMUNE_K8S_MEMORY_LIMIT
+              value: {{ .Values.agents.memoryLimit | quote }}
+            - name: NOEMUNE_K8S_WORKSPACE_SIZE
+              value: {{ .Values.agents.workspaceSize | quote }}
+            - name: NOEMUNE_MAX_SESSIONS
+              value: {{ .Values.agents.maxSessions | quote }}
+            - name: NOEMUNE_IDLE_TIMEOUT_SECS
+              value: {{ .Values.agents.idleTimeoutSeconds | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: egress
+              containerPort: 8081
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels: {{- include "noemune.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port: { name: http }
+{{- end }}

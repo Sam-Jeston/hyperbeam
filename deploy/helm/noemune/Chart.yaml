@@ -1,0 +1,6 @@
+apiVersion: v2
+name: noemune
+description: A self-hosted platform where a team's coding agents work in the open
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

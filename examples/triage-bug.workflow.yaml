@@ -1,0 +1,16 @@
+# A single agent that investigates and reports, without changing anything.
+name: triage-bug
+description: Reproduce a bug, find the cause and write up what a fix would involve
+role: worker
+repos:
+  - acme/web
+grants:
+  - github:read
+inputs:
+  - name: report
+    description: What is going wrong, and how to reproduce it if known
+prompt: |
+  Investigate this bug report: {{report}}
+
+  Reproduce it if you can, find the cause, and report: what is wrong, where, how sure you are,
+  and what a fix would involve. Do not change code.

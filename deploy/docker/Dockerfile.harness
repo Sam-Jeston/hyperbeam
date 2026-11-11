@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+# Harness images: a toolchain plus one coding agent that speaks the Agent
+# Client Protocol. Noemune adds its runner at start-up, so nothing here is
+# Noemune-specific. Use these as they are or as a base for your own
+# (add your language toolchains, linters and test dependencies).
+#
+#   docker build -f deploy/docker/Dockerfile.harness --target claude-code -t noemune/harness-claude-code .
+
+FROM node:22-bookworm-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl git jq less openssh-client patch procps ripgrep unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    # Sandboxes run as uid 1000 with a writable /home/agent and /workspace.
+    && mkdir -p /home/agent /workspace && chown 1000:1000 /home/agent /workspace
+ENV HOME=/home/agent \
+    # Honour HTTPS_PROXY (Noemune's egress allowlist) in Node's own fetch.
+    NODE_USE_ENV_PROXY=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+USER 1000
+WORKDIR /workspace
+
+FROM base AS claude-code
+USER root
+RUN npm install -g @agentclientprotocol/claude-agent-acp && npm cache clean --force
+USER 1000
+
+FROM base AS codex
+USER root
+RUN npm install -g @agentclientprotocol/codex-acp @openai/codex && npm cache clean --force
+USER 1000
+
+FROM base AS gemini
+USER root
+RUN npm install -g @google/gemini-cli && npm cache clean --force
+USER 1000
+
+FROM base AS opencode
+USER root
+RUN npm install -g opencode-ai && npm cache clean --force
+USER 1000

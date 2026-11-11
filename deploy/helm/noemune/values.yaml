@@ -1,0 +1,80 @@
+image:
+  repository: ghcr.io/noemune/server
+  tag: ""            # defaults to the chart's appVersion
+  pullPolicy: IfNotPresent
+
+# URL people use to reach the UI. Used in invite links and pull request footers.
+publicUrl: http://localhost:8080
+
+# Encrypts stored credentials. Generate with `noemune-server gen-key` or
+# `openssl rand -base64 32`. Losing it makes stored credentials unreadable.
+# Alternatively point existingSecret at a Secret with keys `master-key` and
+# `database-url`.
+masterKey: ""
+existingSecret: ""
+
+database:
+  # Connection URL of an external Postgres. Leave empty to use the bundled one.
+  url: ""
+
+# A single-instance Postgres, good enough to start with. For anything you
+# care about, run Postgres properly and set database.url instead.
+postgres:
+  enabled: true
+  image: postgres:16
+  storage: 10Gi
+  storageClassName: ""
+  password: ""       # generated on first install when empty
+
+agents:
+  # Namespace agent pods run in. Created by the chart.
+  namespace: noemune-agents
+  runnerImage:
+    repository: ghcr.io/noemune/runner
+    tag: ""
+  imagePullPolicy: IfNotPresent
+  cpuLimit: "2"
+  memoryLimit: 4Gi
+  workspaceSize: 10Gi
+  maxSessions: 20
+  idleTimeoutSeconds: 900
+
+egress:
+  # Route all sandbox traffic through Noemune's allowlist proxy and block
+  # everything else with a NetworkPolicy. Needs a CNI that enforces
+  # NetworkPolicy (Calico, Cilium, ...); without one the policy is ignored
+  # and only well-behaved clients are constrained.
+  enforce: true
+  # Hosts every sandbox may reach, beyond each harness profile's own.
+  allow:
+    - registry.npmjs.org
+    - pypi.org
+    - files.pythonhosted.org
+    - crates.io
+    - static.crates.io
+    - index.crates.io
+    - proxy.golang.org
+    - sum.golang.org
+  # Labels of the namespace cluster DNS runs in.
+  dnsNamespaceLabels:
+    kubernetes.io/metadata.name: kube-system
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 1Gi
+
+extraEnv: []

@@ -1,0 +1,29 @@
+[package]
+name = "noemune-runner"
+description = "In-sandbox runner: prepares the workspace and drives a coding-agent harness over ACP"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "noemune-runner"
+path = "src/main.rs"
+
+[dependencies]
+noemune-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+url.workspace = true
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+reqwest.workspace = true
+
+[lints]
+workspace = true

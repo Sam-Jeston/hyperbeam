@@ -1,0 +1,79 @@
+{{- $name := include "noemune.name" . }}
+# Where agent sandboxes run. The control plane may manage pods and their
+# token secrets here and nothing else in the cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.agents.namespace }}
+  labels:
+    {{- include "noemune.labels" . | nindent 4 }}
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-sandboxes
+  namespace: {{ .Values.agents.namespace }}
+  labels: {{- include "noemune.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-sandboxes
+  namespace: {{ .Values.agents.namespace }}
+  labels: {{- include "noemune.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-sandboxes
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# Sandboxes accept no connections. They may reach the control plane (API,
+# git proxy, tool gateway, egress proxy) and cluster DNS; with
+# egress.enforce they may reach nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-sandboxes
+  namespace: {{ .Values.agents.namespace }}
+  labels: {{- include "noemune.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      noemune.dev/role: agent
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels: {{- include "noemune.selector" . | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 8081 }
+    - to:
+        - namespaceSelector:
+            matchLabels: {{- toYaml .Values.egress.dnsNamespaceLabels | nindent 14 }}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    {{- if not .Values.egress.enforce }}
+    # Not enforcing: the public internet is open, the cluster's own
+    # networks are not.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10"]
+    {{- end }}
