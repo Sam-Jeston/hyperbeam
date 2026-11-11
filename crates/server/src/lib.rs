@@ -4,6 +4,7 @@ pub mod api;
 pub mod app;
 pub mod auth;
 pub mod config;
+pub mod connections;
 pub mod crypto;
 pub mod egress;
 pub mod error;
@@ -54,6 +55,7 @@ pub async fn build(cfg: Config) -> Result<(App, Router)> {
     };
 
     let app = App::new(cfg, db, secrets, driver);
+    app.adopt_legacy_linear().await.context("moving the Linear integration to a connection")?;
     app.recover().await?;
     tokio::spawn(app.clone().reaper());
 

@@ -120,14 +120,65 @@ export interface GrantInfo {
   id: string;
   label: string;
   system: string;
+  /** How to write the system's name: "GitHub", "Acme tools". */
+  system_title: string;
 }
 
 export interface Meta {
   version: string;
   needs_setup: boolean;
   team_name: string | null;
-  grants: GrantInfo[];
   sandbox_driver: string;
+}
+
+export type ToolLevel = "read" | "write" | "hidden";
+
+export interface ConnectionTool {
+  name: string;
+  title: string | null;
+  description: string;
+  annotations: { readOnlyHint?: boolean; destructiveHint?: boolean } | null;
+  /** What agents may use it at. */
+  level: ToolLevel;
+  /** approved: an admin decided; automatic: the preset sorted it; pending: nobody has; changed: it changed since an admin decided. */
+  status: "approved" | "automatic" | "pending" | "changed";
+  suggested: ToolLevel | null;
+}
+
+export interface Connection {
+  name: string;
+  preset: string | null;
+  title: string;
+  url: string;
+  auth: { header: string | null; prefix: string };
+  headers: Record<string, string>;
+  options: Record<string, string>;
+  tools: ConnectionTool[];
+  awaiting_review: number;
+  tools_error: string | null;
+  tools_refreshed_at: string | null;
+  updated_at: string;
+}
+
+export interface PresetOption {
+  key: string;
+  label: string;
+  placeholder?: string;
+  hint?: string;
+  choices?: { value: string; label: string }[];
+  default?: string;
+}
+
+export interface Preset {
+  id: string;
+  title: string;
+  blurb: string;
+  secret_label: string;
+  secret_help: string;
+  options: PresetOption[];
+  /** vendor: sorted by the vendor's read-only server; name: by tool name. */
+  classified_by: "vendor" | "name";
+  connected: boolean;
 }
 
 export interface CredentialSlot {

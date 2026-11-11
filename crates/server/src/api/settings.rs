@@ -180,15 +180,6 @@ pub async fn test_integration(State(app): State<App>, actor: AuthUser, Path(kind
                     Ok(format!("Authenticated to GitHub as {}", user["login"].as_str().unwrap_or("unknown")))
                 }
             }
-            "linear" => {
-                let auth = if secret.starts_with("lin_api_") { secret.clone() } else { format!("Bearer {secret}") };
-                let resp = app.http.post(&app.cfg.linear_api_url).header("authorization", auth).json(&json!({ "query": "{ viewer { name } organization { name } }" })).send().await?;
-                let body: Value = resp.json().await?;
-                match body.pointer("/data/viewer/name").and_then(Value::as_str) {
-                    Some(name) => Ok(format!("Authenticated to Linear as {name} ({})", body.pointer("/data/organization/name").and_then(Value::as_str).unwrap_or(""))),
-                    None => anyhow::bail!("Linear rejected the key"),
-                }
-            }
             "notion" => {
                 let resp = app
                     .http

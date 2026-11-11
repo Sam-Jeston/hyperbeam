@@ -13,13 +13,13 @@ pub fn tools() -> Vec<ToolDef> {
             "notion_search",
             "Search Notion pages and databases shared with the Hyperbeam integration.",
             schema(&[("query", "string", "Text to search for", true)]),
-            Grant::NotionRead,
+            Grant::read("notion").expect("valid"),
         ),
         tool(
             "notion_get_page",
             "Read a Notion page as text.",
             schema(&[("page_id", "string", "Page id or URL", true)]),
-            Grant::NotionRead,
+            Grant::read("notion").expect("valid"),
         ),
         tool(
             "notion_create_page",
@@ -29,13 +29,13 @@ pub fn tools() -> Vec<ToolDef> {
                 ("title", "string", "Page title", true),
                 ("content", "string", "Body as simple markdown (headings, lists, quotes, code fences)", false),
             ]),
-            Grant::NotionWrite,
+            Grant::write("notion").expect("valid"),
         ),
         tool(
             "notion_append_to_page",
             "Append content to the end of a Notion page.",
             schema(&[("page_id", "string", "Page id or URL", true), ("content", "string", "Simple markdown to append", true)]),
-            Grant::NotionWrite,
+            Grant::write("notion").expect("valid"),
         ),
     ]
 }

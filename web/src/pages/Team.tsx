@@ -8,7 +8,7 @@ import { Select } from "../components/ui/select";
 import { Badge, Card, Notice } from "../components/ui/surface";
 import { api, type GrantInfo, type Repo, type Role, type User } from "../lib/api";
 import { refreshMe, reloadUsers, useStore } from "../lib/store";
-import { Avatar, CopyField, systemName, ErrorNote, Page, PageHeader, SectionTitle, useAction, useDocumentTitle, useLoad } from "../lib/ui";
+import { Avatar, CopyField, ErrorNote, Page, PageHeader, SectionTitle, useAction, useDocumentTitle, useLoad } from "../lib/ui";
 import { cn } from "../lib/utils";
 
 interface Invite {
@@ -45,7 +45,7 @@ const ROLE_HELP: Record<Role, string> = {
 export function TeamPage() {
   useDocumentTitle("People & permissions");
   const me = useStore((s) => s.me)!;
-  const meta = useStore((s) => s.meta)!;
+  const grants = useStore((s) => s.grants);
   const users = useStore((s) => s.users);
   const isAdmin = me.role !== "member";
   const invites = useLoad<{ invites: Invite[] }>(() => (isAdmin ? api.get("/invites") : Promise.resolve({ invites: [] })), [isAdmin]);
@@ -55,7 +55,8 @@ export function TeamPage() {
   const action = useAction();
 
   const people = Object.values(users).sort((a, b) => a.created_at.localeCompare(b.created_at));
-  const systems = [...new Set(meta.grants.map((g) => g.system))];
+  const systems = [...new Set(grants.map((g) => g.system))];
+  const titleOf = (system: string) => grants.find((g) => g.system === system)?.system_title ?? system;
 
   const update = (user: User, patch: Record<string, unknown>, success?: string) =>
     action.run(async () => {
@@ -89,19 +90,19 @@ export function TeamPage() {
               <th rowSpan={2} className="border-b border-border px-4 py-2.5 align-bottom text-[12px] font-medium text-muted">Person</th>
               <th rowSpan={2} className="border-b border-border px-3 py-2.5 align-bottom text-[12px] font-medium text-muted">Role</th>
               {systems.map((system) => (
-                <th key={system} colSpan={meta.grants.filter((g) => g.system === system).length} className="border-l border-border px-2 pt-2.5 pb-1 text-center text-[12px] font-semibold">
-                  {systemName(system)}
+                <th key={system} colSpan={grants.filter((g) => g.system === system).length} className="border-l border-border px-2 pt-2.5 pb-1 text-center text-[12px] font-semibold">
+                  {titleOf(system)}
                 </th>
               ))}
               <th rowSpan={2} className="border-b border-l border-border px-3 py-2.5 align-bottom text-[12px] font-medium text-muted">Repositories</th>
               {isAdmin && <th rowSpan={2} className="border-b border-border" />}
             </tr>
             <tr>
-              {meta.grants.map((g, i) => (
+              {grants.map((g, i) => (
                 <th
                   key={g.id}
                   title={g.label}
-                  className={cn("border-b border-border px-1.5 pb-2 text-center text-[11.5px] font-medium leading-tight text-muted", (i === 0 || meta.grants[i - 1].system !== g.system) && "border-l")}
+                  className={cn("border-b border-border px-1.5 pb-2 text-center text-[11.5px] font-medium leading-tight text-muted", (i === 0 || grants[i - 1].system !== g.system) && "border-l")}
                 >
                   {shortLabel(g)}
                 </th>
@@ -136,8 +137,8 @@ export function TeamPage() {
                       />
                     )}
                   </td>
-                  {meta.grants.map((g, i) => (
-                    <td key={g.id} className={cn("px-1.5 py-2.5 text-center", (i === 0 || meta.grants[i - 1].system !== g.system) && "border-l border-border")}>
+                  {grants.map((g, i) => (
+                    <td key={g.id} className={cn("px-1.5 py-2.5 text-center", (i === 0 || grants[i - 1].system !== g.system) && "border-l border-border")}>
                       <span className="inline-flex">
                         <Checkbox
                           aria-label={`${user.name}: ${g.label}`}
@@ -203,7 +204,7 @@ export function TeamPage() {
         </section>
       )}
 
-      {inviting && <InviteDialog grants={meta.grants} onClose={() => (setInviting(false), invites.reload())} />}
+      {inviting && <InviteDialog grants={grants} onClose={() => (setInviting(false), invites.reload())} />}
       {scoping && (
         <ScopeDialog
           user={scoping}
@@ -227,7 +228,8 @@ function shortLabel(g: GrantInfo): string {
 function InviteDialog({ grants, onClose }: { grants: GrantInfo[]; onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("member");
-  const [picked, setPicked] = useState<string[]>(["github:read", "linear:read", "notion:read"]);
+  // Reading everything is a sensible start; anything more is a choice.
+  const [picked, setPicked] = useState<string[]>(() => grants.filter((g) => g.id.endsWith(":read")).map((g) => g.id));
   const [url, setUrl] = useState<string | null>(null);
   const action = useAction();
   const send = () =>
@@ -277,7 +279,7 @@ function InviteDialog({ grants, onClose }: { grants: GrantInfo[]; onClose: () =>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {grants.map((g) => (
-            <CheckRow key={g.id} checked={picked.includes(g.id)} onCheckedChange={() => setPicked(toggleGrant(picked, g.id))} label={<span>{systemName(g.system)}: {g.label.toLowerCase()}</span>} />
+            <CheckRow key={g.id} checked={picked.includes(g.id)} onCheckedChange={() => setPicked(toggleGrant(picked, g.id))} label={<span>{g.system_title}: {g.label.toLowerCase()}</span>} />
           ))}
         </div>
       </div>

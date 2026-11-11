@@ -4,4 +4,4 @@ pub mod grants;
 pub mod protocol;
 pub mod workflow;
 
-pub use grants::{Grant, GrantSet, RepoScope, Role};
+pub use grants::{Grant, GrantSet, Level, RepoScope, Role};

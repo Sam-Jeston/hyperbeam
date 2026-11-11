@@ -228,7 +228,7 @@ prompt: |
     fn parses_and_renders() {
         let wf = WorkflowSpec::from_yaml(YAML).unwrap();
         assert_eq!(wf.role, SessionRole::Conductor);
-        assert!(wf.grants.has(Grant::GithubRead));
+        assert!(wf.grants.has(&Grant::GITHUB_READ));
         let mut values = BTreeMap::new();
         values.insert("feature".to_string(), "dark mode".to_string());
         assert_eq!(wf.render(&values).unwrap().trim(), "Build dark mode. Ticket: .");

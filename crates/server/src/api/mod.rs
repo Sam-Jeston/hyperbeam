@@ -1,6 +1,7 @@
 //! The HTTP API used by the web UI and the CLI.
 
 mod account;
+mod connections;
 mod settings;
 mod work;
 
@@ -14,7 +15,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use futures::Stream;
-use hyperbeam_core::Grant;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use std::convert::Infallible;
@@ -52,6 +52,11 @@ pub fn router() -> Router<App> {
         .route("/integrations", get(settings::list_integrations))
         .route("/integrations/{kind}", put(settings::put_integration).delete(settings::delete_integration))
         .route("/integrations/{kind}/test", post(settings::test_integration))
+        .route("/connections", get(connections::list).post(connections::create))
+        .route("/connections/{name}", patch(connections::update).delete(connections::delete))
+        .route("/connections/{name}/refresh", post(connections::refresh))
+        .route("/connections/{name}/approvals", put(connections::set_approvals))
+        .route("/grants", get(connections::grants))
         .route("/repos", get(settings::list_repos).post(settings::add_repo))
         .route("/repos/{id}", delete(settings::delete_repo))
         .route("/harnesses", get(settings::list_harnesses).post(settings::create_harness))
@@ -84,13 +89,10 @@ pub fn router() -> Router<App> {
 async fn meta(State(app): State<App>) -> ApiResult<Json<Value>> {
     let (users,): (i64,) = sqlx::query_as("SELECT count(*) FROM users").fetch_one(&app.db).await?;
     let team_name = store::get_setting(&app.db, "team_name").await?.and_then(|v| v.as_str().map(str::to_string));
-    let grants: Vec<Value> =
-        Grant::ALL.iter().map(|g| json!({ "id": g.as_str(), "label": g.label(), "system": g.system() })).collect();
     Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "needs_setup": users == 0,
         "team_name": team_name,
-        "grants": grants,
         "sandbox_driver": app.driver.name(),
     })))
 }

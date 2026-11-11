@@ -23,8 +23,10 @@ An admin’s own agents are still limited to the grants ticked for them. Being a
 | `github:write` | push branches (not the default branch); comment; create issues |
 | `github:open_pr` | open pull requests |
 | `github:merge_pr` | merge pull requests; push to the default branch |
-| `linear:read` / `linear:write` | read / create, update and comment on issues |
 | `notion:read` / `notion:write` | read / create and append to pages |
+| `<connection>:read` / `<connection>:write` | use a [connection](/integrations#connected-services)’s read / write tools, e.g. `linear:write`, `sentry:read` |
+
+Each connection adds its own two columns to **People & permissions**. Only permissions on GitHub, Notion and connections that exist can be granted.
 
 Every stronger grant depends on `read` for its system. Ticking one ticks `read` too, and unticking `read` removes everything else for that system.
 

@@ -6,7 +6,7 @@ import { Bot, ChevronRight, Network } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, type GrantInfo, type Harness, modelLabel, type Repo, type Skill, type Workflow } from "../lib/api";
 import { useStore } from "../lib/store";
-import { A, ErrorNote, systemName, isSubmitKey, modKey, navigate, useAction } from "../lib/ui";
+import { A, ErrorNote, isSubmitKey, modKey, navigate, useAction } from "../lib/ui";
 import { Button } from "./ui/button";
 import { CheckRow, RadioCards, SwitchRow, ToggleChip } from "./ui/controls";
 import { Modal } from "./ui/dialog";
@@ -24,7 +24,7 @@ interface Props {
 
 export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
   const me = useStore((s) => s.me)!;
-  const meta = useStore((s) => s.meta)!;
+  const allGrants = useStore((s) => s.grants);
   const [harnesses, setHarnesses] = useState<Harness[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -67,7 +67,7 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
   // In workflow mode the workflow names the harness.
   const harnessName = mode === "workflow" ? workflow?.spec?.harness ?? defaultHarness : harness;
   const chosenHarness = harnesses.find((h) => h.name === harnessName);
-  const heldGrants: GrantInfo[] = useMemo(() => meta.grants.filter((g) => me.grants.includes(g.id)), [meta, me]);
+  const heldGrants: GrantInfo[] = useMemo(() => allGrants.filter((g) => me.grants.includes(g.id)), [allGrants, me]);
   const needsRead = pickedRepos.length > 0 && !grants.includes("github:read");
   const toggle = (list: string[], value: string) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   const extrasSummary = [
@@ -218,11 +218,11 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
                     <p className="text-[12.5px] text-muted">It can never do more than you can. Untick anything it does not need.</p>
                   </div>
                   {heldGrants.length === 0 ? (
-                    <p className="text-[13px] text-muted">You hold no GitHub, Linear or Notion permissions, so the agent will work without them.</p>
+                    <p className="text-[13px] text-muted">You hold no permissions outside Hyperbeam, so the agent will work without them.</p>
                   ) : (
                     <div className="grid gap-2 sm:grid-cols-2">
                       {heldGrants.map((g) => (
-                        <CheckRow key={g.id} checked={grants.includes(g.id)} onCheckedChange={() => setGrants(toggle(grants, g.id))} label={<span>{systemName(g.system)}: {g.label.toLowerCase()}</span>} />
+                        <CheckRow key={g.id} checked={grants.includes(g.id)} onCheckedChange={() => setGrants(toggle(grants, g.id))} label={<span>{g.system_title}: {g.label.toLowerCase()}</span>} />
                       ))}
                     </div>
                   )}

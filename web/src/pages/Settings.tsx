@@ -9,6 +9,7 @@ import { Select } from "../components/ui/select";
 import { Badge, Card, EmptyState, Notice, Skeleton } from "../components/ui/surface";
 import { api, type CredentialSlot, type Harness, modelLabel, type Repo } from "../lib/api";
 import { refreshMe, useStore } from "../lib/store";
+import { Connections } from "./Connections";
 import { A, CopyField, ErrorNote, navigate, Page, PageHeader, Time, useAction, useDocumentTitle, useLoad } from "../lib/ui";
 
 const TABS: { value: string; label: string; adminOnly: boolean }[] = [
@@ -56,7 +57,7 @@ function CardsSkeleton({ n = 3 }: { n?: number }) {
 // -------------------------------------------------------------- integrations
 
 interface Integration {
-  kind: "github" | "linear" | "notion";
+  kind: "github" | "notion";
   connected: boolean;
   config: { mode?: string; app_id?: string };
   updated_at?: string;
@@ -64,7 +65,6 @@ interface Integration {
 
 const INTEGRATION_COPY: Record<string, { title: string; blurb: string; tile: string }> = {
   github: { title: "GitHub", blurb: "Lets agents clone and push to registered repositories, and work with issues and pull requests.", tile: "G" },
-  linear: { title: "Linear", blurb: "Lets agents read, create and update issues.", tile: "L" },
   notion: { title: "Notion", blurb: "Lets agents read and write the pages you share with the Hyperbeam integration.", tile: "N" },
 };
 
@@ -122,6 +122,7 @@ function Integrations({ isAdmin }: { isAdmin: boolean }) {
         })}
       </div>
       {editing && <IntegrationDialog integration={editing} onClose={() => (setEditing(null), reload())} />}
+      <Connections isAdmin={isAdmin} />
     </>
   );
 }
@@ -179,10 +180,9 @@ function IntegrationDialog({ integration, onClose }: { integration: Integration;
           {isApp && <Field label="App ID">{(id) => <Input id={id} mono value={appId} onChange={(e) => setAppId(e.target.value)} />}</Field>}
         </>
       )}
-      {kind === "linear" && <p className="text-[13px] text-muted">A Linear API key (Settings → Security &amp; access → Personal API keys), or an OAuth access token. Agents act as this key’s user.</p>}
       {kind === "notion" && <p className="text-[13px] text-muted">The secret of a Notion internal integration. In Notion, share each page agents should reach with that integration.</p>}
       <Field
-        label={isApp ? "Private key (PEM)" : kind === "notion" ? "Integration secret" : kind === "linear" ? "API key" : "Token"}
+        label={isApp ? "Private key (PEM)" : kind === "notion" ? "Integration secret" : "Token"}
         hint={integration.connected ? "Leave blank to keep the current one. Stored encrypted and never shown again." : "Stored encrypted and never shown again."}
       >
         {(id) =>

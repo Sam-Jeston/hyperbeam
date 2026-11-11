@@ -33,6 +33,10 @@ pub struct Inner {
     pub bus: broadcast::Sender<Arc<StreamMsg>>,
     pub http: reqwest::Client,
     pub github_tokens: GithubTokens,
+    /// Upstream MCP sessions for connections.
+    pub mcp: crate::connections::client::McpClient,
+    /// Connections whose tools are being re-listed.
+    pub refreshing: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 #[derive(Clone)]
@@ -63,6 +67,8 @@ impl App {
             bus,
             http,
             github_tokens: GithubTokens::default(),
+            mcp: Default::default(),
+            refreshing: Default::default(),
         }))
     }
 

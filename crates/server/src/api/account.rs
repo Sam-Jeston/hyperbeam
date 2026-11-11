@@ -62,7 +62,8 @@ pub async fn setup(State(app): State<App>, Json(body): Json<SetupBody>) -> ApiRe
     .bind(&email)
     .bind(body.name.trim())
     .bind(hash)
-    .bind(json!(GrantSet::all()))
+    // Everything built in. Connections are granted as they are added.
+    .bind(json!(GrantSet::parse_many(["github:merge_pr", "github:write", "github:open_pr", "notion:write"]).expect("valid grants")))
     .fetch_optional(&app.db)
     .await?;
     let user = user.ok_or_else(|| ApiError::Conflict("this installation is already set up".into()))?;
@@ -252,6 +253,7 @@ pub async fn update_user(
     }
     if let Some(grants) = &body.grants {
         let set = GrantSet::parse_many(grants).map_err(|e| ApiError::bad(e.to_string()))?;
+        super::connections::check_grants(&app, &set).await?;
         sqlx::query("UPDATE users SET grants = $2 WHERE id = $1").bind(id).bind(json!(set)).execute(&app.db).await?;
     }
     if let Some(scope) = &body.repo_scope {
@@ -308,6 +310,7 @@ pub async fn create_invite(State(app): State<App>, actor: AuthUser, Json(body): 
         return Err(ApiError::Conflict(format!("{email} is already on the team")));
     }
     let grants = GrantSet::parse_many(&body.grants).map_err(|e| ApiError::bad(e.to_string()))?;
+    super::connections::check_grants(&app, &grants).await?;
     let scope = check_repo_scope(&app, &body.repo_scope).await?;
     let token = crypto::new_token("nmi");
     let id = Uuid::now_v7();

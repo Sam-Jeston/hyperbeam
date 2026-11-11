@@ -150,8 +150,8 @@ pub async fn handle(
         record(&app, &session, action, &repo, false, "repository is not part of this session").await;
         return deny(StatusCode::FORBIDDEN, format!("hyperbeam: {repo} is not one of this session's repositories\n"));
     };
-    let needed = if op == Op::Push { Grant::GithubWrite } else { Grant::GithubRead };
-    if !session.grants.has(needed) {
+    let needed = if op == Op::Push { Grant::GITHUB_WRITE } else { Grant::GITHUB_READ };
+    if !session.grants.has(&needed) {
         record(&app, &session, action, &registered, false, &format!("requires {needed}")).await;
         return deny(StatusCode::FORBIDDEN, format!("hyperbeam: this session lacks {needed}\n"));
     }
@@ -183,8 +183,8 @@ pub async fn handle(
         };
         let protected = format!("refs/heads/{default_branch}");
         let refs: Vec<&str> = updates.iter().map(|u| u.name.as_str()).collect();
-        if updates.iter().any(|u| u.name == protected) && !session.grants.has(Grant::GithubMergePr) {
-            let detail = format!("pushing to {default_branch} requires {}", Grant::GithubMergePr);
+        if updates.iter().any(|u| u.name == protected) && !session.grants.has(&Grant::GITHUB_MERGE_PR) {
+            let detail = format!("pushing to {default_branch} requires {}", Grant::GITHUB_MERGE_PR);
             record(&app, &session, action, &registered, false, &detail).await;
             return deny(
                 StatusCode::FORBIDDEN,

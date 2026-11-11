@@ -98,9 +98,11 @@ pub struct Config {
     #[arg(long, env = "HYPERBEAM_GITHUB_GIT_URL", default_value = "https://github.com")]
     pub github_git_url: String,
 
-    #[arg(long, env = "HYPERBEAM_LINEAR_API_URL", default_value = "https://api.linear.app/graphql")]
-    pub linear_api_url: String,
-
     #[arg(long, env = "HYPERBEAM_NOTION_API_URL", default_value = "https://api.notion.com/v1")]
     pub notion_api_url: String,
+
+    /// Point first-class connections somewhere else, as `preset=url`
+    /// (e.g. `linear=http://127.0.0.1:9000/mcp`). For testing.
+    #[arg(long, env = "HYPERBEAM_PRESET_URLS", value_delimiter = ',', hide = true)]
+    pub preset_urls: Vec<String>,
 }

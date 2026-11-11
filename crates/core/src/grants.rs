@@ -1,89 +1,121 @@
 //! The permission model.
 //!
 //! A [`Grant`] is one capability an agent may exercise against an external
-//! system. People hold grants; an agent session receives the *intersection* of
-//! what its launching user holds and what the session asked for. Agents never
-//! hold more than the person who started them.
+//! system, written `system:level`. People hold grants; an agent session
+//! receives the *intersection* of what its launching user holds and what the
+//! session asked for. Agents never hold more than the person who started them.
+//!
+//! GitHub is built in and has four levels. Every other system (Notion, and
+//! each MCP connection an admin adds) has two: `read` and `write`. Which
+//! systems exist is the control plane's business; this module only checks
+//! that a grant is well formed.
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Grant {
-    /// Clone repositories, read issues, pull requests and code.
-    GithubRead,
-    /// Push branches, comment, create and edit issues.
-    GithubWrite,
-    /// Open pull requests.
-    GithubOpenPr,
-    /// Merge pull requests and push to protected (default) branches.
-    GithubMergePr,
-    LinearRead,
-    LinearWrite,
-    NotionRead,
-    NotionWrite,
+pub enum Level {
+    Read,
+    Write,
+    /// GitHub only.
+    OpenPr,
+    /// GitHub only.
+    MergePr,
 }
 
-impl Grant {
-    pub const ALL: [Grant; 8] = [
-        Grant::GithubRead,
-        Grant::GithubWrite,
-        Grant::GithubOpenPr,
-        Grant::GithubMergePr,
-        Grant::LinearRead,
-        Grant::LinearWrite,
-        Grant::NotionRead,
-        Grant::NotionWrite,
-    ];
-
+impl Level {
     pub fn as_str(self) -> &'static str {
         match self {
-            Grant::GithubRead => "github:read",
-            Grant::GithubWrite => "github:write",
-            Grant::GithubOpenPr => "github:open_pr",
-            Grant::GithubMergePr => "github:merge_pr",
-            Grant::LinearRead => "linear:read",
-            Grant::LinearWrite => "linear:write",
-            Grant::NotionRead => "notion:read",
-            Grant::NotionWrite => "notion:write",
+            Level::Read => "read",
+            Level::Write => "write",
+            Level::OpenPr => "open_pr",
+            Level::MergePr => "merge_pr",
         }
     }
+}
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Grant::GithubRead => "Read repositories, issues and pull requests",
-            Grant::GithubWrite => "Push branches, comment, create issues",
-            Grant::GithubOpenPr => "Open pull requests",
-            Grant::GithubMergePr => "Merge pull requests",
-            Grant::LinearRead => "Read issues and projects",
-            Grant::LinearWrite => "Create and update issues, comment",
-            Grant::NotionRead => "Read pages and databases",
-            Grant::NotionWrite => "Create and edit pages",
-        }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Grant {
+    system: Cow<'static, str>,
+    level: Level,
+}
+
+/// The system name GitHub's grants use.
+pub const GITHUB: &str = "github";
+
+impl Grant {
+    /// Clone repositories, read issues, pull requests and code.
+    pub const GITHUB_READ: Grant = Grant::builtin(GITHUB, Level::Read);
+    /// Push branches, comment, create and edit issues.
+    pub const GITHUB_WRITE: Grant = Grant::builtin(GITHUB, Level::Write);
+    /// Open pull requests.
+    pub const GITHUB_OPEN_PR: Grant = Grant::builtin(GITHUB, Level::OpenPr);
+    /// Merge pull requests and push to protected (default) branches.
+    pub const GITHUB_MERGE_PR: Grant = Grant::builtin(GITHUB, Level::MergePr);
+
+    pub const GITHUB_ALL: [Grant; 4] = [Grant::GITHUB_READ, Grant::GITHUB_WRITE, Grant::GITHUB_OPEN_PR, Grant::GITHUB_MERGE_PR];
+
+    const fn builtin(system: &'static str, level: Level) -> Grant {
+        Grant { system: Cow::Borrowed(system), level }
     }
 
-    pub fn system(self) -> &'static str {
-        self.as_str().split(':').next().unwrap_or_default()
+    /// `read` or `write` on a system other than GitHub. The name must be valid.
+    pub fn new(system: &str, level: Level) -> Result<Grant, UnknownGrant> {
+        format!("{system}:{}", level.as_str()).parse()
+    }
+
+    pub fn read(system: &str) -> Result<Grant, UnknownGrant> {
+        Grant::new(system, Level::Read)
+    }
+
+    pub fn write(system: &str) -> Result<Grant, UnknownGrant> {
+        Grant::new(system, Level::Write)
+    }
+
+    pub fn system(&self) -> &str {
+        &self.system
+    }
+
+    pub fn level(&self) -> Level {
+        self.level
+    }
+
+    /// What this grant lets an agent do. Connections describe their own
+    /// grants more specifically; this is the fallback.
+    pub fn label(&self) -> &'static str {
+        match (self.system(), self.level) {
+            (GITHUB, Level::Read) => "Read repositories, issues and pull requests",
+            (GITHUB, Level::Write) => "Push branches, comment, create issues",
+            (GITHUB, Level::OpenPr) => "Open pull requests",
+            (GITHUB, Level::MergePr) => "Merge pull requests",
+            (_, Level::Read) => "Use read tools",
+            _ => "Use write tools",
+        }
     }
 
     /// Grants that are meaningless without this one. Holding `github:write`
     /// without `github:read` makes no sense, so the stronger grant implies the
     /// weaker.
-    fn implies(self) -> &'static [Grant] {
-        match self {
-            Grant::GithubWrite | Grant::GithubOpenPr | Grant::GithubMergePr => &[Grant::GithubRead],
-            Grant::LinearWrite => &[Grant::LinearRead],
-            Grant::NotionWrite => &[Grant::NotionRead],
-            _ => &[],
-        }
+    fn implies(&self) -> Option<Grant> {
+        (self.level != Level::Read).then(|| Grant { system: self.system.clone(), level: Level::Read })
     }
+}
+
+/// A system name: lowercase letters, digits and dashes, starting with a
+/// letter. Underscores are excluded so `system_tool` names split cleanly.
+pub fn valid_system(name: &str) -> bool {
+    (1..=32).contains(&name.len())
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !name.ends_with('-')
 }
 
 impl fmt::Display for Grant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        write!(f, "{}:{}", self.system, self.level.as_str())
     }
 }
 
@@ -94,16 +126,26 @@ pub struct UnknownGrant(pub String);
 impl FromStr for Grant {
     type Err = UnknownGrant;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Grant::ALL
-            .into_iter()
-            .find(|g| g.as_str() == s)
-            .ok_or_else(|| UnknownGrant(s.to_string()))
+        let unknown = || UnknownGrant(s.to_string());
+        let (system, level) = s.split_once(':').ok_or_else(unknown)?;
+        if system == GITHUB {
+            return Grant::GITHUB_ALL.into_iter().find(|g| g.level.as_str() == level).ok_or_else(unknown);
+        }
+        let level = match level {
+            "read" => Level::Read,
+            "write" => Level::Write,
+            _ => return Err(unknown()),
+        };
+        if !valid_system(system) {
+            return Err(unknown());
+        }
+        Ok(Grant { system: Cow::Owned(system.to_string()), level })
     }
 }
 
 impl Serialize for Grant {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_str())
+        s.collect_str(self)
     }
 }
 
@@ -124,23 +166,29 @@ impl GrantSet {
         Self::default()
     }
 
-    pub fn all() -> Self {
-        Grant::ALL.into_iter().collect()
+    pub fn has(&self, g: &Grant) -> bool {
+        self.0.contains(g)
     }
 
-    pub fn has(&self, g: Grant) -> bool {
-        self.0.contains(&g)
+    /// Holds `system:level`, for systems named at runtime.
+    pub fn allows(&self, system: &str, level: Level) -> bool {
+        self.0.iter().any(|g| g.system() == system && g.level == level)
     }
 
     pub fn insert(&mut self, g: Grant) {
-        self.0.insert(g);
-        for implied in g.implies() {
-            self.0.insert(*implied);
+        if let Some(implied) = g.implies() {
+            self.0.insert(implied);
         }
+        self.0.insert(g);
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = Grant> + '_ {
-        self.0.iter().copied()
+    /// Drop every grant on `system`.
+    pub fn remove_system(&mut self, system: &str) {
+        self.0.retain(|g| g.system() != system);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Grant> + '_ {
+        self.0.iter()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -151,7 +199,7 @@ impl GrantSet {
     pub fn intersect(&self, other: &GrantSet) -> GrantSet {
         // Intersection of two normalised sets is itself normalised: if a
         // grant is in both, so are its implications.
-        GrantSet(self.0.intersection(&other.0).copied().collect())
+        GrantSet(self.0.intersection(&other.0).cloned().collect())
     }
 
     pub fn is_subset(&self, other: &GrantSet) -> bool {
@@ -171,7 +219,7 @@ impl GrantSet {
     }
 
     pub fn to_strings(&self) -> Vec<String> {
-        self.0.iter().map(|g| g.as_str().to_string()).collect()
+        self.0.iter().map(Grant::to_string).collect()
     }
 }
 
@@ -263,20 +311,20 @@ mod tests {
     #[test]
     fn stronger_grants_imply_read() {
         let set = GrantSet::parse_many(["github:merge_pr", "linear:write"]).unwrap();
-        assert!(set.has(Grant::GithubRead));
-        assert!(set.has(Grant::LinearRead));
-        assert!(!set.has(Grant::GithubWrite));
-        assert!(!set.has(Grant::NotionRead));
+        assert!(set.has(&Grant::GITHUB_READ));
+        assert!(set.has(&Grant::read("linear").unwrap()));
+        assert!(!set.has(&Grant::GITHUB_WRITE));
+        assert!(!set.allows("notion", Level::Read));
     }
 
     #[test]
     fn agent_never_exceeds_its_user() {
         let user = GrantSet::parse_many(["github:read", "github:open_pr"]).unwrap();
-        let requested = GrantSet::all();
+        let requested = GrantSet::parse_many(["github:merge_pr", "github:write", "github:open_pr", "sentry:write"]).unwrap();
         let effective = user.intersect(&requested);
         assert_eq!(effective, user);
-        assert!(!effective.has(Grant::GithubMergePr));
-        assert!(!effective.has(Grant::GithubWrite));
+        assert!(!effective.has(&Grant::GITHUB_MERGE_PR));
+        assert!(!effective.allows("sentry", Level::Read));
     }
 
     #[test]
@@ -287,6 +335,22 @@ mod tests {
         let back: GrantSet = serde_json::from_str(&json).unwrap();
         assert_eq!(back, set);
         assert!(serde_json::from_str::<GrantSet>(r#"["github:admin"]"#).is_err());
+    }
+
+    #[test]
+    fn only_github_has_extra_levels_and_names_are_checked() {
+        assert!("posthog:read".parse::<Grant>().is_ok());
+        assert!("my-mcp2:write".parse::<Grant>().is_ok());
+        for bad in ["sentry:merge_pr", "Sentry:read", "my_mcp:read", "-x:read", "x-:read", "nocolon", ":read", "a:"] {
+            assert!(bad.parse::<Grant>().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn removing_a_system_removes_all_its_levels() {
+        let mut set = GrantSet::parse_many(["github:open_pr", "sentry:write"]).unwrap();
+        set.remove_system("sentry");
+        assert_eq!(set.to_strings(), ["github:read", "github:open_pr"]);
     }
 
     #[test]

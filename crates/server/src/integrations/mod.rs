@@ -8,7 +8,8 @@ use crate::store;
 use anyhow::Result;
 use serde_json::Value;
 
-pub const KINDS: [&str; 3] = ["github", "linear", "notion"];
+/// Built-in integrations. Everything else is an MCP connection.
+pub const KINDS: [&str; 2] = ["github", "notion"];
 
 pub fn secret_key(kind: &str) -> String {
     format!("integration/{kind}")

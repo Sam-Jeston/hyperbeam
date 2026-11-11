@@ -8,6 +8,7 @@
 //! !plan a; b; c         publish a plan
 //! !sh <command>         run a shell command in the workspace
 //! !mcp <tool> <json>    call a tool on the Hyperbeam gateway
+//! !tools               list the gateway's tools, by name
 //! !model               say which model is selected
 //! !sleep <seconds>
 //! !fail <message>       end the turn with an error
@@ -239,6 +240,7 @@ impl Agent {
                 }
                 "sh" => self.shell(rest).await,
                 "mcp" => self.mcp(rest).await,
+                "tools" => self.tools().await,
                 "fail" => return Err(if rest.is_empty() { "mock failure".to_string() } else { rest.to_string() }),
                 other => self.stream("agent_message_chunk", &format!("(unknown directive !{other}) ")).await,
             }
@@ -278,6 +280,39 @@ impl Agent {
                 text.push_str(&String::from_utf8_lossy(&out.stderr));
                 self.end_tool(&id, out.status.success(), text.trim_end());
             }
+            Err(err) => self.end_tool(&id, false, &err.to_string()),
+        }
+    }
+
+    async fn tools(&self) {
+        let id = self.begin_tool("hyperbeam · tools/list", "other", json!({}));
+        let (url, auth) = {
+            let state = self.state.lock().await;
+            (state.mcp_url.clone(), state.mcp_auth.clone())
+        };
+        let Some(url) = url else {
+            self.end_tool(&id, false, "no tool gateway configured");
+            return;
+        };
+        let mut request = self.http.post(url).json(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }));
+        if let Some(auth) = auth {
+            request = request.header("authorization", auth);
+        }
+        match request.send().await {
+            Ok(resp) => match resp.json::<Value>().await {
+                Ok(reply) => {
+                    let mut names: Vec<&str> = reply
+                        .pointer("/result/tools")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|t| t.get("name").and_then(Value::as_str))
+                        .collect();
+                    names.sort();
+                    self.end_tool(&id, true, &names.join(" "));
+                }
+                Err(err) => self.end_tool(&id, false, &err.to_string()),
+            },
             Err(err) => self.end_tool(&id, false, &err.to_string()),
         }
     }

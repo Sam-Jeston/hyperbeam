@@ -55,5 +55,4 @@ These point Hyperbeam at the services’ APIs. Change them only for testing or a
 |---|---|
 | `HYPERBEAM_GITHUB_API_URL` | `https://api.github.com` |
 | `HYPERBEAM_GITHUB_GIT_URL` | `https://github.com` |
-| `HYPERBEAM_LINEAR_API_URL` | `https://api.linear.app/graphql` |
 | `HYPERBEAM_NOTION_API_URL` | `https://api.notion.com/v1` |

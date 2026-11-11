@@ -13,8 +13,8 @@ its own sandbox, and everyone can watch the scoping and the building as it happe
 - **Any harness.** Claude Code, Codex, Gemini CLI, OpenCode, or anything else that speaks the
   [Agent Client Protocol](https://agentclientprotocol.com). Bring a team API key or your own credential.
 - **Permissions that belong to people.** An agent can do only what the person who started it may:
-  GitHub (read, write, open PR, merge PR), Linear (read, write), Notion (read, write), per repository.
-- **Agents never hold your credentials.** GitHub, Linear and Notion are reached through Hyperbeam's tool
+  GitHub (read, write, open PR, merge PR), Notion (read, write) and each connected MCP service (read, write), per repository.
+- **Agents never hold your credentials.** GitHub, Notion and connected MCP services (Linear, PostHog, Sentry, or your own) are reached through Hyperbeam's tool
   gateway and git proxy, which check every request and record it.
 - **A conductor.** One agent that scopes a request, starts worker agents across repositories, and is
   told when each reports back.
@@ -43,7 +43,7 @@ runner dials out to the control plane; nothing connects in. That token is what t
 | Path | What it is for | What is checked |
 |---|---|---|
 | `/git/…` | `git clone`, `fetch`, `push` | repository is one of the session's; `github:read` to fetch, `github:write` to push, `github:merge_pr` to push to the default branch |
-| `/mcp` | tools for GitHub, Linear, Notion and the platform | the grant each tool needs, and the repository |
+| `/mcp` | tools for GitHub, Notion, connected MCP servers and the platform | the grant each tool needs, the repository, and for connections that an admin cleared the tool |
 | egress proxy | everything else on the network | host is on the allowlist |
 
 The token is revoked the moment the session ends. Grants are evaluated against what the session's owner
@@ -159,7 +159,7 @@ resumed with a message, in a fresh sandbox, from the branch it pushed.
 3. **Give a harness a credential** (*Settings → Harnesses*): a team API key, or each person's own.
 4. **Invite people** (*People & permissions*) and tick what each person's agents may do.
    Hyperbeam sends no email; you pass the invite link on.
-5. Optionally connect Linear and Notion, and add skills and workflows in the *Library*.
+5. Optionally connect Notion and services such as Linear, PostHog and Sentry, or your own MCP servers, and add skills and workflows in the *Library*.
 
 ### Permissions
 
@@ -169,7 +169,7 @@ resumed with a message, in a fresh sandbox, from the branch it pushed.
 | `github:write` | push branches (not the default branch); comment; create issues |
 | `github:open_pr` | open pull requests |
 | `github:merge_pr` | merge pull requests; push to the default branch |
-| `linear:read` / `linear:write` | read / create, update and comment on issues |
+| `<connection>:read` / `<connection>:write` | use a connection's read / write tools, e.g. `linear:write` |
 | `notion:read` / `notion:write` | read / create and append to pages |
 
 A session's grants are fixed at launch to what its owner holds, optionally narrowed, and are narrowed
@@ -304,7 +304,7 @@ the proxy and directly; a live session survives a control plane restart; stoppin
 its pod and token secret.
 
 Known limits: one team per installation; the control plane runs as a single replica; sign-in is email
-and password only (no OIDC yet); Linear and Notion connect with a key rather than an OAuth flow, so
+and password only (no OIDC yet); Notion and connections use a key rather than an OAuth flow, so
 agents act as that key's user; workspaces are ephemeral, so work survives a teardown only if pushed.
 
 ## Licence

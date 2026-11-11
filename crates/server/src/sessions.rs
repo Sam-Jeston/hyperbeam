@@ -286,7 +286,7 @@ impl App {
                 repos.push(repo.full_name);
             }
         }
-        if !repos.is_empty() && !grants.has(Grant::GithubRead) {
+        if !repos.is_empty() && !grants.has(&Grant::GITHUB_READ) {
             return Err(ApiError::forbidden(
                 "this session would not be allowed to read GitHub (github:read), so it cannot check out repositories",
             ));
@@ -627,10 +627,14 @@ impl App {
         p.push_str("\n## What you may do\n");
         let grants = &session.grants.0;
         if grants.is_empty() {
-            p.push_str("You have no access to GitHub, Linear or Notion in this session.\n");
+            p.push_str("You have no access to GitHub or any other connected service in this session.\n");
         } else {
+            let catalog = self.grant_catalog().await?;
             for grant in grants.iter() {
-                p.push_str(&format!("- {} ({})\n", grant.label(), grant));
+                let id = grant.to_string();
+                // A grant on a service that is no longer connected does nothing.
+                let Some(info) = catalog.iter().find(|g| g["id"] == id.as_str()) else { continue };
+                p.push_str(&format!("- {}: {} ({id})\n", info["system_title"].as_str().unwrap_or_default(), info["label"].as_str().unwrap_or_default()));
             }
             p.push_str(
                 "Anything else is denied by the platform, not by you: if a tool call is refused, say so and continue \

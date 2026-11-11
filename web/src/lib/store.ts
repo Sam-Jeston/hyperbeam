@@ -2,11 +2,13 @@
 // server's event stream, so every screen shows what is happening now.
 
 import { useSyncExternalStore } from "react";
-import { api, type Activity, type Meta, type Session, type User, type Workstream } from "./api";
+import { api, type Activity, type GrantInfo, type Meta, type Session, type User, type Workstream } from "./api";
 
 export interface State {
   meta: Meta | null;
   me: User | null;
+  /** Every permission that can be granted, including each connection's. */
+  grants: GrantInfo[];
   /** null until the first load finishes. */
   ready: boolean;
   users: Record<string, User>;
@@ -19,6 +21,7 @@ export interface State {
 let state: State = {
   meta: null,
   me: null,
+  grants: [],
   ready: false,
   users: {},
   sessions: {},
@@ -84,13 +87,15 @@ export async function refreshMe() {
 }
 
 async function loadTeam() {
-  const [users, sessions, workstreams, activity] = await Promise.all([
+  const [grants, users, sessions, workstreams, activity] = await Promise.all([
+    api.get("/grants"),
     api.get("/users"),
     api.get("/sessions?limit=500"),
     api.get("/workstreams?include_archived=true"),
     api.get("/activity?limit=100"),
   ]);
   set({
+    grants: grants.grants,
     users: byId<User>(users.users),
     sessions: byId<Session>(sessions.sessions),
     workstreams: byId<Workstream>(workstreams.workstreams),
@@ -98,6 +103,12 @@ async function loadTeam() {
     ready: true,
   });
   connect();
+}
+
+/** After connections change: what can be granted, and who holds what. */
+export async function reloadGrants() {
+  const [grants, users] = await Promise.all([api.get("/grants"), api.get("/users")]);
+  set({ grants: grants.grants, users: byId<User>(users.users) });
 }
 
 export async function reloadUsers() {
