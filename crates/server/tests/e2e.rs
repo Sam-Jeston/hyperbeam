@@ -1,11 +1,12 @@
 //! End-to-end tests: a real server, a real Postgres, real runner processes
-//! driving the mock harness, and a fake GitHub (REST API plus a genuine git
+//! driving a scripted test agent, and a fake GitHub (REST API plus a genuine git
 //! smart-HTTP backend) standing in for the outside world.
 //!
 //! Needs Postgres. Set `NOEMUNE_TEST_DATABASE_URL` to a server-level URL
 //! whose user may create databases, e.g.
 //! `postgres://noemune:noemune@127.0.0.1:5440/postgres`. Without it the
-//! tests are skipped. Build the runner first: `cargo build -p noemune-runner`.
+//! tests are skipped. Build the runner and the test agent first:
+//! `cargo build -p noemune-runner -p noemune-test-agent`.
 
 use axum::Router;
 use axum::body::Bytes;
@@ -168,6 +169,7 @@ struct Harness {
     base: String,
     http: reqwest::Client,
     github: FakeGithub,
+    agent: PathBuf,
     _tmp: PathBuf,
 }
 
@@ -249,8 +251,12 @@ impl Harness {
         let gh_addr = gh_listener.local_addr().unwrap();
         tokio::spawn(axum::serve(gh_listener, github.clone().router()).into_future());
 
-        let runner = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("noemune-runner");
-        assert!(runner.exists(), "build the runner first: cargo build -p noemune-runner");
+        let bin_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
+        let runner = bin_dir.join("noemune-runner");
+        let agent = bin_dir.join("noemune-test-agent");
+        for bin in [&runner, &agent] {
+            assert!(bin.exists(), "build the binaries first: cargo build -p noemune-runner -p noemune-test-agent");
+        }
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -274,10 +280,11 @@ impl Harness {
         let (app, router) = noemune_server::build(cfg).await.expect("server builds");
         tokio::spawn(noemune_server::egress::run(app, egress_listener));
         tokio::spawn(axum::serve(listener, router).into_future());
-        Some(Harness { base, http: reqwest::Client::new(), github, _tmp: tmp })
+        Some(Harness { base, http: reqwest::Client::new(), github, agent, _tmp: tmp })
     }
 
-    /// Set up the team; returns the owner's client.
+    /// Set up the team and register the scripted test agent as the
+    /// `scripted` harness; returns the owner's client.
     async fn owner(&self) -> Client<'_> {
         let response = self
             .http
@@ -287,7 +294,9 @@ impl Harness {
             .await
             .unwrap();
         assert!(response.status().is_success(), "{}", response.text().await.unwrap());
-        Client { harness: self, token: token_from(&response) }
+        let owner = Client { harness: self, token: token_from(&response) };
+        owner.post("/harnesses", json!({ "name": "scripted", "title": "Scripted", "image": "unused", "command": [self.agent.to_str().unwrap()] })).await;
+        owner
     }
 
     /// Invite and sign up a member with the given grants.
@@ -354,7 +363,7 @@ async fn agent_works_within_its_owners_permissions() {
 !mcp github_merge_pull_request {"number": 7}
 !mcp noemune_memory_write {"key": "demo-notes", "content": "The demo repo has a greeting."}
 !say All done: opened a pull request."#;
-    let created = mia.post("/sessions", json!({ "prompt": prompt, "harness": "mock", "repos": ["acme/demo"], "new_workstream": "Greeting file" })).await;
+    let created = mia.post("/sessions", json!({ "prompt": prompt, "harness": "scripted", "repos": ["acme/demo"], "new_workstream": "Greeting file" })).await;
     let session = &created["session"];
     let id = session["id"].as_str().unwrap();
     let branch = session["work_branch"].as_str().unwrap().to_string();
@@ -433,7 +442,7 @@ async fn conductor_delegates_and_hears_back() {
     let prompt = r#"Ship the thing.
 !mcp noemune_spawn_agent {"title": "Build part A", "prompt": "!say Part A is built."}
 !say Delegated part A."#;
-    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "mock", "role": "conductor" })).await;
+    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "scripted", "role": "conductor" })).await;
     let id = created["session"]["id"].as_str().unwrap();
 
     // Turn 1: delegate. Turn 2: prompted by the platform when the worker reports.
@@ -466,7 +475,7 @@ async fn only_people_who_could_have_launched_an_agent_may_direct_it() {
     let owner = h.owner().await;
     let mia = h.member(&owner, "mia@example.com", &[]).await;
 
-    let created = owner.post("/sessions", json!({ "prompt": "!say hi", "harness": "mock" })).await;
+    let created = owner.post("/sessions", json!({ "prompt": "!say hi", "harness": "scripted" })).await;
     let id = created["session"]["id"].as_str().unwrap();
     owner.wait_turns(id, 1).await;
 
@@ -488,7 +497,7 @@ async fn only_people_who_could_have_launched_an_agent_may_direct_it() {
     assert_eq!(h.http.get(format!("{}/api/v1/sessions", h.base)).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
 
     // A session whose owner is removed is stopped.
-    let mia_session = mia.post("/sessions", json!({ "prompt": "!sleep 30", "harness": "mock" })).await;
+    let mia_session = mia.post("/sessions", json!({ "prompt": "!sleep 30", "harness": "scripted" })).await;
     let mia_session_id = mia_session["session"]["id"].as_str().unwrap();
     let mia_id = mia.get("/me").await["user"]["id"].as_str().unwrap().to_string();
     owner.ok(Method::PATCH, &format!("/users/{mia_id}"), Some(json!({ "disabled": true }))).await;
@@ -505,7 +514,7 @@ async fn sandbox_egress_is_limited_to_the_allowlist() {
     let prompt = "!sh curl -sS -m 10 https://blocked.invalid/ 2>&1; echo \"exit=$?\"\n\
                   !sh curl -sS -m 10 https://allowed.invalid/ 2>&1; echo \"exit=$?\"\n\
                   !sh curl -sS -m 10 -x \"http://session:nmr_forged@${HTTPS_PROXY##*@}\" https://allowed.invalid/ 2>&1; echo \"exit=$?\"";
-    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "mock" })).await;
+    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "scripted" })).await;
     let id = created["session"]["id"].as_str().unwrap();
     let events = owner.wait_turns(id, 1).await;
 
@@ -525,28 +534,28 @@ async fn model_is_chosen_per_session_with_harness_defaults() {
     let Some(h) = Harness::start().await else { return };
     let owner = h.owner().await;
     let said = |events: &[Value]| text_of(events, "agent_message");
-    let mock = |harnesses: &Value| harnesses["harnesses"].as_array().unwrap().iter().find(|x| x["name"] == "mock").unwrap().clone();
+    let scripted = |harnesses: &Value| harnesses["harnesses"].as_array().unwrap().iter().find(|x| x["name"] == "scripted").unwrap().clone();
     let start = |body: Value| async { owner.post("/sessions", body).await["session"]["id"].as_str().unwrap().to_string() };
 
     // Nothing chosen anywhere: the harness's own default.
-    let id = start(json!({ "prompt": "!model", "harness": "mock" })).await;
+    let id = start(json!({ "prompt": "!model", "harness": "scripted" })).await;
     assert_eq!(said(&owner.wait_turns(&id, 1).await).trim(), "model=mock-small");
 
     // The harness reported what it offers; that becomes the list to pick from.
-    let harness = mock(&owner.get("/harnesses").await);
+    let harness = scripted(&owner.get("/harnesses").await);
     let offered: Vec<&str> = harness["model_choices"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str()).collect();
     assert_eq!(offered, ["mock-small", "mock-large"]);
     assert_eq!(harness["model_choices"][1]["label"], "Mock Large");
 
     // Chosen for one session.
-    let id = start(json!({ "prompt": "!model", "harness": "mock", "model": "mock-large" })).await;
+    let id = start(json!({ "prompt": "!model", "harness": "scripted", "model": "mock-large" })).await;
     let events = owner.wait_turns(&id, 1).await;
     assert_eq!(said(&events).trim(), "model=mock-large");
     assert!(text_of(&events, "system").contains("model: Mock Large"));
     assert_eq!(owner.get(&format!("/sessions/{id}")).await["harness"]["model"], "Mock Large");
 
     // A model the harness does not have: the session still runs, and says so.
-    let id = start(json!({ "prompt": "!model", "harness": "mock", "model": "no-such-model" })).await;
+    let id = start(json!({ "prompt": "!model", "harness": "scripted", "model": "no-such-model" })).await;
     let events = owner.wait_turns(&id, 1).await;
     assert_eq!(said(&events).trim(), "model=mock-small");
     assert!(text_of(&events, "error").contains("Could not select model `no-such-model`"));
@@ -554,12 +563,12 @@ async fn model_is_chosen_per_session_with_harness_defaults() {
     // A default on the harness profile applies when a session does not choose.
     let harness_id = harness["id"].as_str().unwrap();
     owner.ok(Method::PATCH, &format!("/harnesses/{harness_id}"), Some(json!({ "default_model": "mock-large" }))).await;
-    let id = start(json!({ "prompt": "!model", "harness": "mock" })).await;
+    let id = start(json!({ "prompt": "!model", "harness": "scripted" })).await;
     assert_eq!(said(&owner.wait_turns(&id, 1).await).trim(), "model=mock-large");
 
     // A conductor's worker inherits the conductor's model unless told otherwise.
     let id = start(json!({
-        "harness": "mock", "role": "conductor", "model": "mock-small",
+        "harness": "scripted", "role": "conductor", "model": "mock-small",
         "prompt": "!mcp noemune_spawn_agent {\"title\": \"inherits\", \"prompt\": \"!model\"}\n!mcp noemune_spawn_agent {\"title\": \"overrides\", \"prompt\": \"!model\", \"model\": \"mock-large\"}",
     }))
     .await;
@@ -573,10 +582,10 @@ async fn model_is_chosen_per_session_with_harness_defaults() {
     let (status, body) = owner.call(Method::PATCH, &format!("/harnesses/{harness_id}"), Some(json!({ "models": [{ "id": "mock-small" }] }))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     owner.ok(Method::PATCH, &format!("/harnesses/{harness_id}"), Some(json!({ "models": [{ "id": "mock-small", "label": "Small" }], "default_model": null }))).await;
-    let (status, body) = owner.call(Method::POST, "/sessions", Some(json!({ "prompt": "!model", "harness": "mock", "model": "mock-large" }))).await;
+    let (status, body) = owner.call(Method::POST, "/sessions", Some(json!({ "prompt": "!model", "harness": "scripted", "model": "mock-large" }))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["error"].as_str().unwrap().contains("limited to these models: mock-small"), "{body}");
-    assert_eq!(mock(&owner.get("/harnesses").await)["model_choices"], json!([{ "id": "mock-small", "label": "Small", "description": "" }]));
+    assert_eq!(scripted(&owner.get("/harnesses").await)["model_choices"], json!([{ "id": "mock-small", "label": "Small", "description": "" }]));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -601,7 +610,7 @@ async fn models_are_listed_as_soon_as_a_harness_has_a_credential() {
     // A harness that needs a key: nothing is known, and nothing can be asked, until it has one.
     let created = owner
         .post("/harnesses", json!({
-            "name": "keyed", "title": "Keyed", "image": "unused", "command": ["{runner}", "mock-agent"],
+            "name": "keyed", "title": "Keyed", "image": "unused", "command": [h.agent.to_str().unwrap()],
             "credentials": [{ "env": "KEYED_API_KEY", "label": "Key", "kind": "api_key" }],
         }))
         .await;
@@ -627,7 +636,7 @@ async fn models_are_listed_as_soon_as_a_harness_has_a_credential() {
     assert_eq!(broken["model_choices"].as_array().unwrap().len(), 2);
 
     // On request, for a harness that needs no key.
-    owner.ok(Method::POST, &format!("/harnesses/{}/models/refresh", find(&owner.get("/harnesses").await, "mock")["id"].as_str().unwrap()), None).await;
-    let mock = settled("mock").await;
-    assert_eq!(mock["model_choices"].as_array().unwrap().len(), 2, "{mock}");
+    owner.ok(Method::POST, &format!("/harnesses/{}/models/refresh", find(&owner.get("/harnesses").await, "scripted")["id"].as_str().unwrap()), None).await;
+    let scripted = settled("scripted").await;
+    assert_eq!(scripted["model_choices"].as_array().unwrap().len(), 2, "{scripted}");
 }

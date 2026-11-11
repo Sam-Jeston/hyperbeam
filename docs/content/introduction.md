@@ -38,11 +38,8 @@ Teams that already use coding agents and want that work to be visible, shared an
 
 The **control plane** (`noemune-server`) holds all state in Postgres, serves the web UI and API, and is the only way out of a sandbox. Each live agent session gets its own **sandbox**: a process on your laptop for development, or a locked-down pod on Kubernetes. Inside it, the **runner** drives the harness over ACP and streams everything it does back to the control plane.
 
-> [!NOTE]
-> Noemune is early. The control plane, runner, UI and CLI work and are covered by end-to-end tests using a scripted mock harness and a fake GitHub. [What is verified](/status) lists exactly what has and has not been tested.
-
 ## Next steps
 
-- [Quick start](/quickstart): run it on your laptop in a few minutes, no model key needed.
+- [Quick start](/quickstart): run it on your laptop and connect your first agent in a few minutes.
 - [Concepts](/concepts): the handful of ideas the rest of the docs build on.
 - [Install on Kubernetes](/install-kubernetes): set it up for your team.

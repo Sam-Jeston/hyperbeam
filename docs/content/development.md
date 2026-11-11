@@ -9,7 +9,8 @@ description: Build Noemune from source, run the tests, and work on the web app, 
 |---|---|
 | `crates/core` | Permissions, runner protocol, workflow format. |
 | `crates/server` | API, session manager, tool gateway, git proxy, egress proxy, sandbox drivers. |
-| `crates/runner` | The in-sandbox runner, ACP client and mock harness. |
+| `crates/runner` | The in-sandbox runner and ACP client. |
+| `crates/test-agent` | A scripted ACP agent used by the end-to-end tests. Not shipped. |
 | `crates/cli` | The `noemune` command. |
 | `web` | The product UI (React, Radix, Tailwind), embedded in the server binary. |
 | `site` | The landing page. |
@@ -21,7 +22,7 @@ description: Build Noemune from source, run the tests, and work on the web app, 
 ## Build and test
 
 ```bash
-cargo build -p noemune-runner
+cargo build -p noemune-runner -p noemune-test-agent
 NOEMUNE_TEST_DATABASE_URL=postgres://noemune:noemune@127.0.0.1:5440/postgres cargo test --workspace
 (cd web && bun run typecheck && bun run build)
 ```

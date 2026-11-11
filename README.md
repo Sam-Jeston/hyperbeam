@@ -19,9 +19,6 @@ its own sandbox, and everyone can watch the scoping and the building as it happe
 - **Skills, workflows and team notes.** What your team teaches its agents, kept in one place and
   shared by every session.
 
-> Status: early. The control plane, runner, UI and CLI work and are covered by end-to-end tests using a
-> scripted mock harness and a fake GitHub. See [What is and is not verified](#what-is-and-is-not-verified).
-
 ## How it fits together
 
 ```
@@ -68,18 +65,15 @@ export NOEMUNE_MASTER_KEY=$(./target/release/noemune-server gen-key)   # keep it
 
 Open <http://localhost:8080>. The first person in creates the team and owns it.
 
-To see it work before adding a model key, start an agent with the **Mock harness** (under *Harness, skills
-and permissions* in the *New work* dialog). It runs a script instead of a model:
+Then connect an agent. In this mode it runs on your machine, so install its ACP adapter, for example
+for Claude Code:
 
-```
-!plan look around; report
-!sh ls -la
-!say Nothing here yet.
+```sh
+npm i -g @agentclientprotocol/claude-agent-acp
 ```
 
-For a real agent in this mode, install its ACP adapter on your machine
-(for example `npm i -g @agentclientprotocol/claude-agent-acp`) and add a credential under
-*Settings → Harnesses*.
+Add a credential for it under *Settings → Harnesses*, then press <kbd>C</kbd> (or *New work*), describe
+the task and start the agent.
 
 ## Install on Kubernetes
 
@@ -236,19 +230,21 @@ toolchains to it so agents can build and test your code.
 ## Development
 
 ```sh
-cargo build -p noemune-runner
+cargo build -p noemune-runner -p noemune-test-agent
 NOEMUNE_TEST_DATABASE_URL=postgres://noemune:noemune@127.0.0.1:5440/postgres cargo test --workspace
 (cd web && bun run typecheck && bun run build)
 ```
 
-The end-to-end tests start a real server, real runner processes and a fake GitHub that serves the git
+The end-to-end tests start a real server, real runner processes driving a scripted ACP agent
+(`crates/test-agent`, not shipped), and a fake GitHub that serves the git
 smart-HTTP protocol, and need Postgres; without `NOEMUNE_TEST_DATABASE_URL` they are skipped.
 
 | Path | Contents |
 |---|---|
 | `crates/core` | permissions, runner protocol, workflow format |
 | `crates/server` | API, session manager, tool gateway, git proxy, egress proxy, sandbox drivers |
-| `crates/runner` | in-sandbox runner; ACP client; mock harness |
+| `crates/runner` | in-sandbox runner; ACP client |
+| `crates/test-agent` | scripted ACP agent for the end-to-end tests (not shipped) |
 | `crates/cli` | the `noemune` command |
 | `web` | the UI (React, built with Bun) |
 | `site` | the landing page, rendered to static HTML (`bun run dev` in `site/`) |
@@ -256,26 +252,19 @@ smart-HTTP protocol, and need Postgres; without `NOEMUNE_TEST_DATABASE_URL` they
 | `brand` | brand tokens and guidelines shared by `web`, `site` and `docs` |
 | `deploy` | Dockerfiles and the Helm chart |
 
-## What is and is not verified
+## Testing and limits
 
-Verified by automated tests: the permission model; sign-up, invites and roles; the full session
-lifecycle through the runner and ACP (with the mock harness); cloning and pushing through the git
+Covered by automated tests: the permission model; sign-up, invites and roles; the full session
+lifecycle through the runner and ACP; cloning and pushing through the git
 proxy, including default-branch protection; opening pull requests through the gateway; denial and
 audit of what is not permitted; immediate revocation; resume after teardown; conductor delegation;
-model selection; and the egress allowlist. The UI was exercised in a browser against the mock harness.
+model selection; and the egress allowlist.
 
 Verified by hand on a local `kind` cluster (Kubernetes 1.34) with the Helm chart: the control plane
 and bundled Postgres come up; a session runs in its own pod as a non-root user with no service account
 token; allowlisted hosts are reachable through the egress proxy and others are refused, both through
 the proxy and directly; a live session survives a control plane restart; stopping a session removes
 its pod and token secret.
-
-Not yet verified, and likely to need fixes on first contact:
-
-- **A real harness.** The ACP client follows the published v1 schema but has only driven the mock.
-- **Linear, Notion and GitHub App mode.** Written against the documented APIs; never called against
-  the real services.
-- **The harness images.** `Dockerfile.harness` has not been built for each agent.
 
 Known limits: one team per installation; the control plane runs as a single replica; sign-in is email
 and password only (no OIDC yet); Linear and Notion connect with a key rather than an OAuth flow, so

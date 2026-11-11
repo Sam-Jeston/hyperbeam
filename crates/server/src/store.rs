@@ -308,7 +308,7 @@ pub async fn record_audit(
 /// replaced with the runner binary's own path inside the sandbox.
 pub async fn seed_harnesses(db: &PgPool) -> sqlx::Result<()> {
     let slot = |env: &str, label: &str, kind: &str| serde_json::json!({ "env": env, "label": label, "kind": kind });
-    let builtins: [(&str, &str, &str, &str, Value, Value, Value, Option<&str>); 5] = [
+    let builtins: [(&str, &str, &str, &str, Value, Value, Value, Option<&str>); 4] = [
         (
             "claude-code",
             "Claude Code",
@@ -354,16 +354,6 @@ pub async fn seed_harnesses(db: &PgPool) -> sqlx::Result<()> {
                 slot("OPENROUTER_API_KEY", "OpenRouter API key", "api_key"),
             ]),
             serde_json::json!(["api.anthropic.com", "api.openai.com", "openrouter.ai", "models.dev", "opencode.ai"]),
-            None,
-        ),
-        (
-            "mock",
-            "Mock harness",
-            "A scripted agent with no model attached. For smoke tests and demos.",
-            "ghcr.io/noemune/harness-base:latest",
-            serde_json::json!(["{runner}", "mock-agent"]),
-            serde_json::json!([]),
-            serde_json::json!([]),
             None,
         ),
     ];

@@ -1,7 +1,6 @@
 mod acp;
 mod bridge;
 mod conn;
-mod mock;
 mod session;
 mod workspace;
 
@@ -31,8 +30,6 @@ struct Cli {
 enum Command {
     /// Connect to the control plane and run one session (the default).
     Run,
-    /// A scriptable ACP agent with no model, for tests and smoke checks.
-    MockAgent,
     /// Copy this binary to DEST (used by the Kubernetes init container).
     Install { dest: PathBuf },
     /// Bridge a stdio MCP client to the Noemune tool gateway.
@@ -54,7 +51,6 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     match cli.command.unwrap_or(Command::Run) {
-        Command::MockAgent => mock::run().await,
         Command::Install { dest } => {
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)?;

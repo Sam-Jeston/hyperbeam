@@ -1,6 +1,6 @@
 ---
 title: Quick start
-description: Run Noemune on your laptop and watch an agent work, without a model key.
+description: Run Noemune on your laptop and connect your first coding agent.
 ---
 
 This runs agents as ordinary local processes with **no isolation**. It is for trying Noemune out. To run it for a team, [install it on Kubernetes](/install-kubernetes).
@@ -38,31 +38,28 @@ export NOEMUNE_MASTER_KEY=$(./target/release/noemune-server gen-key)
 
 Open <http://localhost:8080>. The first person in creates the team and owns it.
 
-## 4. Start an agent with the mock harness
+## 4. Connect an agent
 
-The **Mock harness** runs a script instead of a model, so you can see Noemune work before adding a key.
-
-1. Press <kbd>C</kbd>, or select **New work**.
-2. Choose **Mock harness** under **Harness**.
-3. Paste this script as the request, and select **Start agent**:
-
-```text
-!plan look around; report
-!sh ls -la
-!say Nothing here yet.
-```
-
-You land on the agent’s page and watch it set up its sandbox, make a plan, run a command and reply. Send it a message to continue the conversation.
-
-## 5. Try a real agent
-
-In this local mode the harness runs on your machine, so install its ACP adapter. For Claude Code:
+Noemune drives coding agents over the [Agent Client Protocol](https://agentclientprotocol.com) (ACP). In this local mode the agent runs on your machine, so install its ACP adapter. For Claude Code:
 
 ```bash
 npm i -g @agentclientprotocol/claude-agent-acp
 ```
 
-Then give the harness a credential under **Settings → Harnesses**, and pick it in **New work**. See [Harnesses and models](/harnesses) and [Credentials](/credentials).
+Then give it a credential:
+
+1. Open **Settings → Harnesses** and select **Claude Code**.
+2. Add an Anthropic API key, for the team or just for yourself. Or add your own Claude subscription token from `claude setup-token`; it is used only for your sessions.
+
+Codex, Gemini CLI and OpenCode work the same way. See [Harnesses and models](/harnesses) and [Credentials](/credentials).
+
+## 5. Start your first agent
+
+1. Press <kbd>C</kbd>, or select **New work**.
+2. Describe the task, and pick **Claude Code** under **Harness** if it is not already the default.
+3. Select **Start agent**.
+
+You land on the agent’s page and watch it set up its sandbox, plan, run commands and reply. Send it a message to continue the conversation. To let agents clone your repositories and open pull requests, connect GitHub under **Settings → Integrations**. See [Set up a team](/team-setup).
 
 ## Next steps
 

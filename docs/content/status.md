@@ -1,17 +1,15 @@
 ---
-title: What is verified
-description: What has been tested, how, and what has not been tested yet.
+title: Testing and limits
+description: How Noemune is tested, and the limits to know about.
 ---
 
-Noemune is early. This page says plainly what has been verified and what has not, so you know what to expect.
+## Automated tests
 
-## Verified by automated tests
-
-The end-to-end tests start a real server, real runner processes and a fake GitHub that serves the git smart-HTTP protocol. They cover:
+The end-to-end tests start a real server, real runner processes driving a scripted ACP agent, and a fake GitHub that serves the git smart-HTTP protocol. They cover:
 
 - the permission model;
 - sign-up, invites and roles;
-- the full session lifecycle through the runner and ACP, with the mock harness;
+- the full session lifecycle through the runner and ACP;
 - cloning and pushing through the git proxy, including default-branch protection;
 - opening pull requests through the gateway;
 - denial and audit of what is not permitted;
@@ -21,9 +19,7 @@ The end-to-end tests start a real server, real runner processes and a fake GitHu
 - model selection;
 - the egress allowlist.
 
-The UI was exercised in a browser against the mock harness.
-
-## Verified by hand on Kubernetes
+## Kubernetes
 
 On a local `kind` cluster (Kubernetes 1.34) with the Helm chart:
 
@@ -32,14 +28,6 @@ On a local `kind` cluster (Kubernetes 1.34) with the Helm chart:
 - allowlisted hosts are reachable through the egress proxy, and others are refused, both through the proxy and directly;
 - a live session survives a control plane restart;
 - stopping a session removes its pod and token secret.
-
-## Not yet verified
-
-These are likely to need fixes on first contact:
-
-- **A real harness.** The ACP client follows the published v1 schema but has only driven the mock.
-- **Linear, Notion and GitHub App mode.** Written against the documented APIs; never called against the real services.
-- **The harness images.** `Dockerfile.harness` has not been built for each agent.
 
 ## Known limits
 

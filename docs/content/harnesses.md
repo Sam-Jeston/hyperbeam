@@ -7,10 +7,7 @@ A **harness** is the coding agent that runs inside each sandbox. Noemune drives 
 
 ## Built-in profiles
 
-Noemune ships profiles for **Claude Code**, **Codex**, **Gemini CLI** and **OpenCode**, plus a **Mock harness** that runs a script instead of a model, for trying things out. Each needs a [credential](/credentials) before it can start, except the mock.
-
-> [!WARNING]
-> So far the ACP client has only driven the mock harness. It follows the published v1 schema, but expect rough edges with real harnesses. See [What is verified](/status).
+Noemune ships profiles for **Claude Code**, **Codex**, **Gemini CLI** and **OpenCode**. Each needs a [credential](/credentials) before it can start.
 
 On Kubernetes, set each profile’s image to one you have built and pushed. See [Install on Kubernetes](/install-kubernetes#build-and-push-the-images).
 

@@ -55,7 +55,7 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
         setSkills(s.skills);
         setWorkflows(w.workflows.filter((wf: Workflow) => wf.spec));
         setDefaultHarness(settings.default_harness);
-        const preferred = h.harnesses.find((x: Harness) => x.name === settings.default_harness && x.ready) ?? h.harnesses.find((x: Harness) => x.ready && x.name !== "mock");
+        const preferred = h.harnesses.find((x: Harness) => x.name === settings.default_harness && x.ready) ?? h.harnesses.find((x: Harness) => x.ready);
         setHarness(preferred?.name ?? settings.default_harness);
         setLoaded(true);
       },

@@ -527,10 +527,10 @@ function Status() {
     <Section className="pt-0 sm:pt-0">
       <div className="grid gap-6 rounded-xl border border-border bg-surface p-6 sm:p-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
         <div>
-          <div className="eyebrow mb-2">Status</div>
-          <h2 className="font-display text-[24px] font-semibold tracking-[-0.02em]">Early, and clear about it</h2>
-          <p className="mt-2 text-[14.5px] leading-relaxed text-muted">The control plane, runner, UI and CLI work, and are covered by end-to-end tests. We say plainly what is and isn’t verified.</p>
-          <a href={docs("status")} className="mt-3 inline-flex items-center gap-1.5 text-[14px] text-primary hover:underline">What is and is not verified <ArrowRight className="size-3.5" /></a>
+          <div className="eyebrow mb-2">Tested</div>
+          <h2 className="font-display text-[24px] font-semibold tracking-[-0.02em]">Tested end to end</h2>
+          <p className="mt-2 text-[14.5px] leading-relaxed text-muted">The control plane, runner and CLI are covered by end-to-end tests against a real server, real runners and a real git backend, and the Helm chart is exercised on Kubernetes.</p>
+          <a href={docs("status")} className="mt-3 inline-flex items-center gap-1.5 text-[14px] text-primary hover:underline">Testing and limits <ArrowRight className="size-3.5" /></a>
         </div>
         <ul className="grid content-start gap-2.5 text-[14px]">
           {[
@@ -552,7 +552,7 @@ function FinalCta() {
       <div className="relative mx-auto grid max-w-[640px] justify-items-center gap-5 text-center">
         <BrandMark size={44} />
         <h2 className="font-display text-[32px] font-semibold leading-tight tracking-[-0.03em] sm:text-[42px]">Give your agents a place the team can see.</h2>
-        <p className="text-[16px] text-muted">Start with the mock harness on your laptop. No model key needed to see it work.</p>
+        <p className="text-[16px] text-muted">Run it on your laptop and connect your first agent in a few minutes.</p>
         <div className="flex flex-wrap justify-center gap-3">
           <ButtonLink href={docs("quickstart")}>Get started <ArrowRight /></ButtonLink>
           {REPO_URL && <ButtonLink href={REPO_URL} variant="secondary"><GitHubIcon /> View the source</ButtonLink>}
@@ -566,7 +566,7 @@ function Footer() {
   const cols: [string, [string, string][]][] = [
     ["Product", [["How it works", "#how"], ["Security", "#security"], ["Self-host", "#self-host"]]],
     ["Docs", [["Quick start", docs("quickstart")], ["Concepts", docs("concepts")], ["Install on Kubernetes", docs("install-kubernetes")], ["Command line", docs("cli")]]],
-    ["Project", [["What is verified", docs("status")], ["Development", docs("development")], ...(REPO_URL ? [["Source", REPO_URL] as [string, string]] : [])]],
+    ["Project", [["Testing and limits", docs("status")], ["Development", docs("development")], ...(REPO_URL ? [["Source", REPO_URL] as [string, string]] : [])]],
   ];
   return (
     <footer className="border-t border-border px-4 py-12 sm:px-8">

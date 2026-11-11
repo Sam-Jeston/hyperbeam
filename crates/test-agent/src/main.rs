@@ -1,8 +1,6 @@
-//! A scriptable ACP agent with no model behind it.
-//!
-//! It exists so the whole platform can be exercised end to end (in tests,
-//! demos and first-run smoke checks) without a model credential. Lines in the
-//! prompt that begin with `!` are directives:
+//! A scriptable ACP agent with no model behind it, for the end-to-end tests
+//! in `crates/server/tests`. It is not shipped. Lines in the prompt that begin
+//! with `!` are directives:
 //!
 //! ```text
 //! !say <text>           stream a message
@@ -40,7 +38,8 @@ struct Agent {
     http: reqwest::Client,
 }
 
-pub async fn run() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let (out, mut out_rx) = mpsc::unbounded_channel::<Value>();
     let writer = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
@@ -74,7 +73,7 @@ pub async fn run() -> Result<()> {
                         "mcpCapabilities": { "http": true, "sse": false },
                         "promptCapabilities": {},
                     },
-                    "agentInfo": { "name": "noemune-mock", "title": "Mock harness", "version": env!("CARGO_PKG_VERSION") },
+                    "agentInfo": { "name": "noemune-test-agent", "title": "Test agent", "version": env!("CARGO_PKG_VERSION") },
                     "authMethods": [],
                 }),
             ),
@@ -205,7 +204,7 @@ impl Agent {
             let short: String = request.chars().take(200).collect();
             self.stream(
                 "agent_message_chunk",
-                &format!("This is the mock harness; no model is attached. I received: \"{short}\""),
+                &format!("This is the test agent; no model is attached. I received: \"{short}\""),
             )
             .await;
             return Ok(());
