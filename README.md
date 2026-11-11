@@ -77,6 +77,41 @@ npm i -g @agentclientprotocol/claude-agent-acp
 Add a credential for it under *Settings → Harnesses*, then press <kbd>C</kbd> (or *New work*), describe
 the task and start the agent.
 
+## Run in a local cluster
+
+The quick start is for trying Hyperbeam out and for working on it. To keep it running on your own
+machine, run the Helm chart in a local [kind](https://kind.sigs.k8s.io) cluster (0.24 or later, whose
+network plugin enforces NetworkPolicy). Each session then gets its own sandbox pod, the control plane is
+restarted if it crashes, and Postgres keeps its data on a persistent volume. You need Docker, kind,
+kubectl and Helm.
+
+```sh
+kind create cluster --name hyperbeam
+
+docker build -f deploy/docker/Dockerfile --target server -t hyperbeam/server:dev .
+docker build -f deploy/docker/Dockerfile --target runner -t hyperbeam/runner:dev .
+docker build -f deploy/docker/Dockerfile.harness --target claude-code -t hyperbeam/harness-claude-code:dev .
+kind load docker-image --name hyperbeam \
+  hyperbeam/server:dev hyperbeam/runner:dev hyperbeam/harness-claude-code:dev
+
+openssl rand -base64 32 > hyperbeam-master-key     # keep it safe: it encrypts stored credentials
+helm install hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --create-namespace \
+  --set masterKey="$(cat hyperbeam-master-key)" \
+  --set image.repository=hyperbeam/server --set image.tag=dev \
+  --set agents.runnerImage.repository=hyperbeam/runner --set agents.runnerImage.tag=dev
+kubectl -n hyperbeam rollout status deploy/hyperbeam
+kubectl -n hyperbeam port-forward svc/hyperbeam 8080:8080
+```
+
+Open <http://localhost:8080> and create the team. Under *Settings → Harnesses → Claude Code → Edit*, set
+the container image to `hyperbeam/harness-claude-code:dev` and add a credential. No ACP adapter is needed
+on your machine: it is in the harness image.
+
+To update, rebuild with a new tag, `kind load` it, and run
+`helm upgrade hyperbeam deploy/helm/hyperbeam -n hyperbeam --reuse-values --set image.tag=… --set agents.runnerImage.tag=…`.
+Data survives restarts of the control plane, Docker and your machine, but `kind delete cluster` deletes
+it. The docs page *Run in a local cluster* covers backups, an external Postgres, and k3d and minikube.
+
 ## Install on Kubernetes
 
 Build and push the images (the project does not publish images yet):

@@ -3,7 +3,7 @@ title: Quick start
 description: Run Hyperbeam on your laptop and connect your first coding agent.
 ---
 
-This runs agents as ordinary local processes with **no isolation**. It is for trying Hyperbeam out. To run it for a team, [install it on Kubernetes](/install-kubernetes).
+This runs agents as ordinary local processes with **no isolation**. It is for trying Hyperbeam out and for working on it. To keep it running on your own machine, with each agent in its own sandbox, [run it in a local cluster](/local-cluster). To run it for a team, [install it on Kubernetes](/install-kubernetes).
 
 ## Before you start
 
@@ -65,3 +65,4 @@ You land on the agent’s page and watch it set up its sandbox, plan, run comman
 
 - [Concepts](/concepts) explains workstreams, sessions, sandboxes and grants.
 - [Set up a team](/team-setup) connects GitHub and invites people.
+- [Run in a local cluster](/local-cluster) moves this setup into sandbox pods on your machine.

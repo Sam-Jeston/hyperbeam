@@ -42,4 +42,5 @@ The **control plane** (`hyperbeam-server`) holds all state in Postgres, serves t
 
 - [Quick start](/quickstart): run it on your laptop and connect your first agent in a few minutes.
 - [Concepts](/concepts): the handful of ideas the rest of the docs build on.
+- [Run in a local cluster](/local-cluster): the Helm chart on your own machine, with every agent sandboxed.
 - [Install on Kubernetes](/install-kubernetes): set it up for your team.

@@ -6,3 +6,4 @@ node_modules
 .hyperbeam-dev
 /site/dist
 /docs/dist
+hyperbeam-master-key
