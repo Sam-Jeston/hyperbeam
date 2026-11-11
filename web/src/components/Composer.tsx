@@ -1,10 +1,19 @@
 // "New work": the one place people start agents from. Deliberately usable by
 // someone who has never opened a terminal.
 
+import * as Collapsible from "@radix-ui/react-collapsible";
+import { Bot, ChevronRight, Network } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, type GrantInfo, type Harness, modelLabel, type Repo, type Skill, type Workflow } from "../lib/api";
 import { useStore } from "../lib/store";
-import { A, ErrorNote, Modal, navigate, useAction } from "../lib/ui";
+import { A, ErrorNote, systemName, isSubmitKey, modKey, navigate, useAction } from "../lib/ui";
+import { Button } from "./ui/button";
+import { CheckRow, RadioCards, SwitchRow, ToggleChip } from "./ui/controls";
+import { Modal } from "./ui/dialog";
+import { Field, Input, Kbd, Textarea } from "./ui/input";
+import { Tabs } from "./ui/menu";
+import { Select } from "./ui/select";
+import { Badge, Notice, Skeleton } from "./ui/surface";
 
 interface Props {
   onClose: () => void;
@@ -60,11 +69,17 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
   const chosenHarness = harnesses.find((h) => h.name === harnessName);
   const heldGrants: GrantInfo[] = useMemo(() => meta.grants.filter((g) => me.grants.includes(g.id)), [meta, me]);
   const needsRead = pickedRepos.length > 0 && !grants.includes("github:read");
-
   const toggle = (list: string[], value: string) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  const extrasSummary = [
+    pickedSkills.length > 0 && `${pickedSkills.length} skill${pickedSkills.length > 1 ? "s" : ""}`,
+    grants.length === heldGrants.length ? "all your permissions" : `${grants.length} of ${heldGrants.length} permissions`,
+  ].filter(Boolean).join(" · ");
 
-  const start = () =>
-    action.run(async () => {
+  const canStart = mode === "workflow" ? !!workflow : prompt.trim().length > 0 && !!chosenHarness?.ready && !needsRead;
+
+  const start = () => {
+    if (!canStart || action.busy) return;
+    void action.run(async () => {
       const place = workstreamId ? { workstream_id: workstreamId } : track ? { new_workstream: title.trim() || firstLine(mode === "workflow" ? workflow?.spec?.name ?? "" : prompt) } : {};
       let result;
       if (mode === "workflow" && workflow) {
@@ -85,169 +100,189 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
       onClose();
       navigate(`/s/${result.session.id}`);
     });
-
-  const canStart = mode === "workflow" ? !!workflow : prompt.trim().length > 0 && !!chosenHarness?.ready && !needsRead;
+  };
 
   return (
-    <Modal title={workstreamId ? "Add an agent" : "New work"} onClose={onClose} wide>
-      {workflows.length > 0 && (
-        <div className="tabs" style={{ marginBottom: 0 }}>
-          <button className={mode === "prompt" ? "active" : ""} onClick={() => setMode("prompt")}>Describe it</button>
-          <button className={mode === "workflow" ? "active" : ""} onClick={() => setMode("workflow")}>Run a workflow</button>
-        </div>
-      )}
-
-      {mode === "prompt" ? (
+    <Modal
+      title={workstreamId ? "Add an agent" : "New work"}
+      description={workstreamId ? "It is given the workstream’s brief and repositories." : "Describe the outcome. An agent works on it in its own sandbox."}
+      onClose={onClose}
+      size="lg"
+      modalOnly={prompt.trim().length > 0}
+      footer={
         <>
-          <label className="field">
-            What should get done?
-            <textarea
-              autoFocus
-              rows={5}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe the outcome you want, the way you would brief a colleague. Mention anything it must not break and how you will know it is done."
+          <span className="mr-auto hidden items-center gap-1 text-[12px] text-faint sm:flex"><Kbd>{modKey}</Kbd><Kbd>Enter</Kbd> to start</span>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={!canStart} loading={action.busy} onClick={start}>
+            {action.busy ? "Starting" : role === "conductor" && mode === "prompt" ? "Start conductor" : "Start agent"}
+          </Button>
+        </>
+      }
+    >
+      <div className="contents" onKeyDown={(e) => isSubmitKey(e) && (e.preventDefault(), start())}>
+        {workflows.length > 0 && (
+          <Tabs
+            className="-mt-2"
+            value={mode}
+            onValueChange={setMode}
+            tabs={[{ value: "prompt", label: "Describe it" }, { value: "workflow", label: "Run a workflow" }]}
+          />
+        )}
+
+        {!loaded && !action.error ? (
+          <div className="grid gap-3"><Skeleton className="h-28" /><Skeleton className="h-16" /><Skeleton className="h-9" /></div>
+        ) : mode === "prompt" ? (
+          <>
+            <Field label="What should get done?">
+              {(id) => (
+                <Textarea
+                  id={id}
+                  autoFocus
+                  rows={5}
+                  className="text-[14px]"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="Describe the outcome you want, the way you would brief a colleague. Mention anything it must not break and how you will know it is done."
+                />
+              )}
+            </Field>
+
+            <RadioCards
+              aria-label="Who does the work"
+              value={role}
+              onValueChange={setRole}
+              options={[
+                { value: "worker", icon: <Bot />, title: "One agent", description: "A single agent does the work in its own sandbox." },
+                { value: "conductor", icon: <Network />, title: "Conductor", description: "Scopes the work, then starts and coordinates several agents. Best for work spanning repositories." },
+              ]}
             />
-          </label>
 
-          <div className="row" style={{ alignItems: "stretch" }}>
-            {(["worker", "conductor"] as const).map((r) => (
-              <label key={r} className="card card-pad grow" style={{ cursor: "pointer", borderColor: role === r ? "var(--accent)" : undefined }}>
-                <div className="row">
-                  <input type="radio" name="role" checked={role === r} onChange={() => setRole(r)} />
-                  <strong>{r === "worker" ? "One agent" : "Conductor"}</strong>
-                </div>
-                <div className="small muted" style={{ marginTop: 4 }}>
-                  {r === "worker" ? "A single agent does the work in its own sandbox." : "Scopes the work, then starts and coordinates several agents. Best for work spanning repositories."}
-                </div>
-              </label>
-            ))}
-          </div>
-
-          <div>
-            <div className="field">Repositories</div>
-            {repos.length === 0 ? (
-              <p className="small muted">No repositories are available to you yet. {me.role !== "member" ? <A href="/settings/repositories">Register one</A> : "Ask an admin to register one."}</p>
-            ) : (
-              <div className="row-wrap" style={{ marginTop: 4 }}>
-                {repos.map((repo) => (
-                  <label key={repo.id} className="check chip" style={pickedRepos.includes(repo.full_name) ? { background: "var(--accent-soft)", color: "var(--accent)" } : undefined}>
-                    <input type="checkbox" checked={pickedRepos.includes(repo.full_name)} onChange={() => setPickedRepos(toggle(pickedRepos, repo.full_name))} />
-                    {repo.full_name}
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="row" style={{ alignItems: "flex-start" }}>
-            <label className="field grow">
-              Harness
-              <select value={harness} onChange={(e) => (setHarness(e.target.value), setModel(""))}>
-                {harnesses.map((h) => (
-                  <option key={h.id} value={h.name}>
-                    {h.title}{h.name === defaultHarness ? " (team default)" : ""}{h.ready ? "" : " — needs a credential"}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <ModelPicker harness={chosenHarness} model={model} onChange={setModel} />
-          </div>
-
-          <details>
-            <summary className="muted" style={{ cursor: "pointer" }}>Skills and permissions</summary>
-            <div className="stack" style={{ marginTop: 12 }}>
-              {skills.length > 0 && (
-                <div>
-                  <div className="field">Skills</div>
-                  <div className="row-wrap" style={{ marginTop: 4 }}>
-                    {skills.map((skill) => (
-                      <label key={skill.id} className="check chip" title={skill.description}>
-                        <input type="checkbox" checked={pickedSkills.includes(skill.name)} onChange={() => setPickedSkills(toggle(pickedSkills, skill.name))} />
-                        {skill.name}
-                      </label>
-                    ))}
-                  </div>
+            <div className="grid gap-1.5">
+              <div className="text-[13px] font-medium">Repositories</div>
+              {repos.length === 0 ? (
+                <p className="text-[13px] text-muted">
+                  No repositories are available to you yet.{" "}
+                  {me.role !== "member" ? <A href="/settings/repositories" className="text-primary hover:underline">Register one</A> : "Ask an admin to register one."}
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {repos.map((repo) => (
+                    <ToggleChip key={repo.id} mono pressed={pickedRepos.includes(repo.full_name)} onPressedChange={() => setPickedRepos(toggle(pickedRepos, repo.full_name))}>
+                      {repo.full_name}
+                    </ToggleChip>
+                  ))}
                 </div>
               )}
-              <div>
-                <div className="field">What this agent may do</div>
-                <p className="hint">It can never do more than you can. Untick anything it does not need.</p>
-                {heldGrants.length === 0 ? (
-                  <p className="small muted">You hold no GitHub, Linear or Notion permissions, so the agent will work without them.</p>
-                ) : (
-                  <div className="stack" style={{ gap: 4, marginTop: 6 }}>
-                    {heldGrants.map((g) => (
-                      <label key={g.id} className="check">
-                        <input type="checkbox" checked={grants.includes(g.id)} onChange={() => setGrants(toggle(grants, g.id))} />
-                        <span><span style={{ textTransform: "capitalize" }}>{g.system}</span>: {g.label.toLowerCase()}</span>
-                      </label>
-                    ))}
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Harness">
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={harness}
+                    onValueChange={(v) => (setHarness(v), setModel(""))}
+                    options={harnesses.map((h) => ({
+                      value: h.name,
+                      label: h.title,
+                      description: [h.name === defaultHarness && "Team default", !h.ready && "Needs a credential"].filter(Boolean).join(" · ") || undefined,
+                    }))}
+                  />
+                )}
+              </Field>
+              <ModelPicker harness={chosenHarness} model={model} onChange={setModel} />
+            </div>
+
+            <Collapsible.Root className="group rounded-lg border border-border">
+              <Collapsible.Trigger className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[13px] hover:bg-surface-2/50">
+                <ChevronRight className="size-4 text-faint transition-transform group-data-[state=open]:rotate-90" />
+                <span className="font-medium">Skills and permissions</span>
+                <span className="ml-auto truncate text-[12.5px] text-muted">{extrasSummary}</span>
+              </Collapsible.Trigger>
+              <Collapsible.Content className="grid gap-5 border-t border-border px-3.5 py-3.5">
+                {skills.length > 0 && (
+                  <div className="grid gap-1.5">
+                    <div className="text-[13px] font-medium">Skills</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {skills.map((skill) => (
+                        <ToggleChip key={skill.id} mono title={skill.description} pressed={pickedSkills.includes(skill.name)} onPressedChange={() => setPickedSkills(toggle(pickedSkills, skill.name))}>
+                          {skill.name}
+                        </ToggleChip>
+                      ))}
+                    </div>
                   </div>
                 )}
-              </div>
-            </div>
-          </details>
-        </>
-      ) : (
-        <>
-          <label className="field">
-            Workflow
-            <select value={workflowId} onChange={(e) => (setWorkflowId(e.target.value), setInputs({}), setModel(""))}>
-              <option value="">Choose a workflow…</option>
-              {workflows.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-            </select>
-          </label>
-          {workflow?.spec && (
-            <>
-              {workflow.spec.description && <p className="muted">{workflow.spec.description}</p>}
-              <div className="row-wrap">
-                <span className="chip chip-accent">{workflow.spec.role === "conductor" ? "Conductor" : "One agent"}</span>
-                {workflow.spec.repos.map((r) => <span key={r} className="chip">{r}</span>)}
-                {workflow.spec.grants.map((g) => <span key={g} className="chip">{g}</span>)}
-              </div>
-              <ModelPicker
-                harness={chosenHarness}
-                model={model}
-                onChange={setModel}
-                fallback={workflow.spec.model ? `Workflow’s choice (${modelLabel(chosenHarness?.model_choices ?? [], workflow.spec.model)})` : undefined}
-              />
-              {workflow.spec.inputs.map((input) => (
-                <label key={input.name} className="field">
-                  {input.name}{input.required && !input.default ? "" : " (optional)"}
-                  <textarea rows={2} style={{ minHeight: 0 }} value={inputs[input.name] ?? ""} placeholder={input.default ?? ""} onChange={(e) => setInputs({ ...inputs, [input.name]: e.target.value })} />
-                  {input.description && <span className="hint">{input.description}</span>}
-                </label>
-              ))}
-            </>
-          )}
-        </>
-      )}
+                <div className="grid gap-2">
+                  <div>
+                    <div className="text-[13px] font-medium">What this agent may do</div>
+                    <p className="text-[12.5px] text-muted">It can never do more than you can. Untick anything it does not need.</p>
+                  </div>
+                  {heldGrants.length === 0 ? (
+                    <p className="text-[13px] text-muted">You hold no GitHub, Linear or Notion permissions, so the agent will work without them.</p>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {heldGrants.map((g) => (
+                        <CheckRow key={g.id} checked={grants.includes(g.id)} onCheckedChange={() => setGrants(toggle(grants, g.id))} label={<span>{systemName(g.system)}: {g.label.toLowerCase()}</span>} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Collapsible.Content>
+            </Collapsible.Root>
+          </>
+        ) : (
+          <>
+            <Field label="Workflow">
+              {(id) => (
+                <Select
+                  id={id}
+                  value={workflowId}
+                  placeholder="Choose a workflow"
+                  onValueChange={(v) => (setWorkflowId(v), setInputs({}), setModel(""))}
+                  options={workflows.map((w) => ({ value: w.id, label: w.name, description: w.description || undefined }))}
+                />
+              )}
+            </Field>
+            {workflow?.spec && (
+              <>
+                {workflow.spec.description && <p className="text-[13.5px] text-muted">{workflow.spec.description}</p>}
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge tone="primary">{workflow.spec.role === "conductor" ? "Conductor" : "One agent"}</Badge>
+                  {workflow.spec.repos.map((r) => <Badge key={r} mono>{r}</Badge>)}
+                  {workflow.spec.grants.map((g) => <Badge key={g} tone="outline" mono>{g}</Badge>)}
+                </div>
+                {workflow.spec.inputs.map((input) => (
+                  <Field key={input.name} label={input.name} optional={!(input.required && !input.default)} hint={input.description}>
+                    {(id) => <Textarea id={id} rows={2} className="min-h-0" value={inputs[input.name] ?? ""} placeholder={input.default ?? ""} onChange={(e) => setInputs({ ...inputs, [input.name]: e.target.value })} />}
+                  </Field>
+                ))}
+                <ModelPicker
+                  harness={chosenHarness}
+                  model={model}
+                  onChange={setModel}
+                  fallback={workflow.spec.model ? `Workflow’s choice (${modelLabel(chosenHarness?.model_choices ?? [], workflow.spec.model)})` : undefined}
+                />
+              </>
+            )}
+          </>
+        )}
 
-      {!workstreamId && (
-        <div className="stack" style={{ gap: 8 }}>
-          <label className="check">
-            <input type="checkbox" checked={track} onChange={(e) => setTrack(e.target.checked)} />
-            Put this on the board as a workstream
-          </label>
-          {track && (
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Workstream title (optional: defaults to the first line of the request)" />
-          )}
-        </div>
-      )}
+        {!workstreamId && loaded && (
+          <div className="grid gap-2.5 rounded-lg bg-surface-2/50 px-3.5 py-3">
+            <SwitchRow checked={track} onCheckedChange={setTrack} label="Put this on the board" description="Creates a workstream so the team can follow and discuss it." />
+            {track && (
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Workstream title" placeholder="Workstream title (defaults to the first line of the request)" />
+            )}
+          </div>
+        )}
 
-      {loaded && mode === "prompt" && chosenHarness && !chosenHarness.ready && (
-        <div className="warn-note">
-          {chosenHarness.title} has no credential yet. <A href="/settings/harnesses">Add one in Settings</A> before starting.
-        </div>
-      )}
-      {needsRead && <div className="warn-note">Checking out repositories needs “Read repositories” (github:read), which this agent would not hold.</div>}
-      <ErrorNote error={action.error} />
-      <div className="modal-foot">
-        <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" disabled={!canStart || action.busy} onClick={() => void start()}>
-          {action.busy ? "Starting…" : role === "conductor" && mode === "prompt" ? "Start conductor" : "Start agent"}
-        </button>
+        {loaded && mode === "prompt" && chosenHarness && !chosenHarness.ready && (
+          <Notice tone="warning" title={`${chosenHarness.title} has no credential yet`}>
+            <A href="/settings/harnesses" className="text-primary hover:underline">Add one in Settings</A> before starting, or pick another harness.
+          </Notice>
+        )}
+        {needsRead && <Notice tone="warning">Checking out repositories needs “Read repositories” (github:read), which this agent would not hold.</Notice>}
+        <ErrorNote error={action.error} />
       </div>
     </Modal>
   );
@@ -260,23 +295,23 @@ function ModelPicker(props: { harness: Harness | undefined; model: string; onCha
   const fallback = props.fallback ?? (profileDefault ? `Default (${profileDefault})` : "Harness default");
   if (choices.length === 0) {
     return (
-      <label className="field grow">
-        Model
-        <input type="text" value={props.model} placeholder={fallback} onChange={(e) => props.onChange(e.target.value.trim())} />
-        <span className="hint">This harness has not reported its models yet; it will after its first session. Leave blank for its default.</span>
-      </label>
+      <Field label="Model" hint="This harness has not reported its models yet; it will after its first session. Leave blank for its default.">
+        {(id) => <Input id={id} value={props.model} placeholder={fallback} onChange={(e) => props.onChange(e.target.value.trim())} />}
+      </Field>
     );
   }
   const chosen = choices.find((m) => m.id === props.model);
   return (
-    <label className="field grow">
-      Model
-      <select value={props.model} onChange={(e) => props.onChange(e.target.value)}>
-        <option value="">{fallback}</option>
-        {choices.map((m) => <option key={m.id} value={m.id}>{m.label || m.id}</option>)}
-      </select>
-      {chosen?.description && <span className="hint">{chosen.description}</span>}
-    </label>
+    <Field label="Model" hint={chosen?.description}>
+      {(id) => (
+        <Select
+          id={id}
+          value={props.model}
+          onValueChange={props.onChange}
+          options={[{ value: "", label: fallback }, ...choices.map((m) => ({ value: m.id, label: m.label || m.id }))]}
+        />
+      )}
+    </Field>
   );
 }
 
