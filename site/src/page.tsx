@@ -1,10 +1,11 @@
 import {
-  ArrowRight, BookOpen, Bot, Check, CircleCheck, Columns3, Copy, FilePen, FileText, GitPullRequest, KeyRound, Loader2, Menu, Moon,
-  Network, NotebookPen, ScrollText, Server, ShieldCheck, ShieldX, Sun, Terminal, Users, Workflow,
+  ArrowRight, BookOpen, Bot, Check, CircleCheck, Columns3, Copy, FilePen, FileText, GitPullRequest, Globe, KeyRound, Loader2, Menu, Moon,
+  Network, NotebookPen, NotebookText, Package, ScrollText, Server, ShieldCheck, ShieldX, SquareKanban, Sun, Terminal, Users, Workflow,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { MARK_FILLS, MARK_LAYERS } from "../../brand/mark";
 import { docs, REPO_URL } from "./config";
+import { AGENTS, BEATS, clock, DESTS, LANES, logRow, PEOPLE, type DestId } from "./egress-data";
 import { highlight } from "./highlight";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -367,18 +368,7 @@ function Security() {
         A sandbox holds exactly one secret: a run token that identifies its session, revoked the moment the session ends. Everything it does outside the sandbox goes through Hyperbeam, which checks it and records it.
       </SectionHead>
 
-      <div className="grid items-stretch gap-3 lg:grid-cols-[1fr_auto_1.25fr_auto_1fr]">
-        <DiagramBox title="Agent sandbox" tone="muted" items={["Your harness, over ACP", "hyperbeam-runner", "One run token. No keys."]} icon={<ScrollText />} />
-        <Arrow />
-        <DiagramBox
-          title="Hyperbeam control plane"
-          tone="primary"
-          icon={<ShieldCheck />}
-          items={["Tool gateway (MCP): checks the grant for every call", "Git proxy: clone and push, per repository", "Egress allowlist: everything else on the network", "Audit log: allowed, failed and blocked"]}
-        />
-        <Arrow />
-        <DiagramBox title="Your systems" tone="muted" items={["GitHub", "Linear", "Notion", "Allowlisted hosts"]} icon={<KeyRound />} />
-      </div>
+      <EgressScene />
 
       <div className="mt-12 grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
         <div className="grid content-start gap-4">
@@ -412,22 +402,102 @@ function Security() {
   );
 }
 
-function DiagramBox(props: { title: string; items: string[]; icon: ReactNode; tone: "muted" | "primary" }) {
-  return (
-    <div className={cx("grid content-start gap-3 rounded-xl border p-5", props.tone === "primary" ? "border-primary/50 bg-accent/40" : "border-border bg-surface")}>
-      <div className="flex items-center gap-2 font-display text-[15px] font-semibold [&_svg]:size-4 [&_svg]:text-primary">{props.icon}{props.title}</div>
-      <ul className="grid gap-1.5 text-[13.5px] text-muted">
-        {props.items.map((i) => <li key={i} className="flex gap-2"><span className="mt-2 size-1 shrink-0 rounded-full bg-faint" />{i}</li>)}
-      </ul>
-    </div>
-  );
-}
+/**
+ * Requests leaving agent sandboxes and meeting Hyperbeam: let through to the system they asked for, or refused at
+ * the gate. Each agent carries the grants of the person who started it. The script animates it (egress.ts);
+ * without it, it reads as a diagram with a few lines of audit log.
+ */
+/** How a card in the egress scene lights up when the script adds a state class to it. */
+const LIGHTS = cx(
+  "transition-[border-color,box-shadow,color] duration-200",
+  "[&.is-sending]:border-primary/70 [&.is-sending]:ring-3 [&.is-sending]:ring-primary/15",
+  "[&.is-hit]:border-run/70 [&.is-hit]:ring-3 [&.is-hit]:ring-run/15 [&.is-granted]:border-run/60",
+  "[&.is-blocked]:border-fail/70 [&.is-blocked]:ring-3 [&.is-blocked]:ring-fail/15",
+  "[&.is-refused]:border-fail/70 [&.is-refused]:ring-3 [&.is-refused]:ring-fail/15 [&.is-refused]:text-fail",
+  "[&.is-revoking]:border-wait/70 [&.is-revoking]:ring-3 [&.is-revoking]:ring-wait/20",
+);
 
-function Arrow() {
+function EgressScene() {
+  const destIcon: Record<DestId, ReactNode> = {
+    github: <GitHubIcon />, linear: <SquareKanban />, notion: <NotebookText />, npm: <Package />, pastebin: <Globe />, metadata: <Globe />,
+  };
+  // Five rows, as many as the live log keeps, so the figure doesn't change height when the script takes over.
+  const staticLog = BEATS.slice(0, 5).map((b, i) => logRow(b, clock(i * 3))).reverse().join("");
+  const colLabel = "mb-3 text-[11px] font-semibold uppercase tracking-[0.07em] text-faint";
   return (
-    <div aria-hidden="true" className="grid place-items-center text-faint">
-      <ArrowRight className="size-5 rotate-90 lg:rotate-0" />
-    </div>
+    <figure data-egress className="relative overflow-hidden rounded-xl border border-border bg-surface/40">
+      <div aria-hidden="true" className="dot-grid pointer-events-none absolute inset-0 opacity-70" />
+      <canvas data-egress-back aria-hidden="true" className="pointer-events-none absolute inset-0 size-full" />
+      <div className="relative z-10 grid gap-y-16 p-5 sm:p-8 lg:grid-cols-[minmax(0,1fr)_216px_minmax(0,0.78fr)] lg:gap-x-[clamp(72px,9vw,128px)]">
+        <div data-agents>
+          <div className={colLabel}>Agents, in their sandboxes</div>
+          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-1">
+            {AGENTS.map((a) => (
+              <div key={a.id} data-agent={a.id} data-owner={a.owner} className={cx(LIGHTS, "grid gap-2 rounded-lg border border-border bg-surface p-3")}>
+                <div className="flex items-center gap-2">
+                  <Bot className="size-4 shrink-0 text-faint" />
+                  <span className="text-[13.5px] font-semibold">{a.harness}</span>
+                  <span className="ml-auto truncate font-mono text-[11px] text-faint">{a.repo}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[12px] text-muted">
+                  <span className="grid size-4.5 place-items-center rounded-full text-[8.5px] font-semibold text-white" style={{ background: `oklch(0.58 0.12 ${PEOPLE[a.owner].hue})` }}>{a.owner}</span>
+                  <span>for {PEOPLE[a.owner].name}</span>
+                  {a.via && <span className="truncate text-faint">· {a.via}</span>}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {a.grants.map((g) => <span key={g} data-grant={g} className="rounded-full border border-border-strong px-1.5 py-px font-mono text-[10.5px] text-muted transition-colors [&.revoked]:border-fail/45 [&.revoked]:bg-fail/10 [&.revoked]:text-fail [&.revoked]:line-through">{g}</span>)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div data-gate className="relative grid content-center gap-3 self-center rounded-xl border border-primary/50 bg-surface p-4 shadow-pop">
+          <div className="flex items-center gap-2">
+            <BrandMark size={20} />
+            <Wordmark className="text-[16px]" />
+          </div>
+          <div className="grid grid-cols-3 gap-1.5 lg:grid-cols-1 lg:gap-2">
+            {LANES.map((l) => (
+              <div key={l.id} data-lane={l.id} className={cx(LIGHTS, "rounded-md border border-border bg-background/60 px-2.5 py-2")}>
+                <div className="text-[12.5px] font-medium leading-tight">{l.label}</div>
+                <div className="mt-0.5 hidden font-mono text-[10.5px] text-faint sm:block">{l.hint}</div>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 text-[11.5px] text-muted">
+            <KeyRound className="size-3.5 shrink-0 text-primary" /> Credentials are added here, never inside the sandbox
+          </div>
+        </div>
+
+        <div data-dests>
+          <div className={colLabel}>Your systems and the internet</div>
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
+            {DESTS.map((d) => (
+              <div
+                key={d.id}
+                data-dest={d.id}
+                className={cx(
+                  LIGHTS,
+                  "flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-[13px] [&_svg]:size-4 [&_svg]:shrink-0",
+                  d.allowed ? "border-border bg-surface [&_svg]:text-muted" : "border-dashed border-border-strong bg-background/70 text-faint",
+                )}
+              >
+                {destIcon[d.id]}
+                <span className={cx("truncate", (d.id === "npm" || !d.allowed) && "font-mono text-[11.5px]")}>{d.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <canvas data-egress-front aria-hidden="true" className="pointer-events-none absolute inset-0 z-20 size-full" />
+      <figcaption className="relative z-10 border-t border-border bg-background/60 px-5 py-3 sm:px-8">
+        <div className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-faint">
+          <ScrollText className="size-3.5" /> Audit log
+        </div>
+        <ol data-egress-log aria-label="Audit log, illustrative" className="grid" dangerouslySetInnerHTML={{ __html: staticLog }} />
+      </figcaption>
+    </figure>
   );
 }
 

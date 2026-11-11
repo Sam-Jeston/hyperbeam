@@ -1,6 +1,12 @@
 // The landing page's few interactive pieces. The page is complete without this script.
 
+import { startEgressScene } from "./egress";
+
 const root = document.documentElement;
+
+// The security section's egress scene.
+const egress = document.querySelector<HTMLElement>("[data-egress]");
+if (egress) startEgressScene(egress);
 
 // Theme: dark by default, remembered per browser under the same key as the app.
 document.querySelectorAll<HTMLButtonElement>("[data-theme-toggle]").forEach((button) =>
