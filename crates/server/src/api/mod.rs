@@ -81,6 +81,7 @@ pub fn router() -> Router<App> {
         .route("/sessions/{id}/events", get(work::list_events))
         .route("/sessions/{id}/stream", get(stream_session))
         .route("/sessions/{id}/messages", post(work::send_message))
+        .route("/sessions/{id}/answer", post(work::answer_question))
         .route("/sessions/{id}/cancel", post(work::cancel_session))
         .route("/sessions/{id}/stop", post(work::stop_session))
         .route("/activity", get(work::list_activity))

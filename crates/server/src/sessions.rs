@@ -5,13 +5,14 @@ use crate::app::App;
 use crate::crypto;
 use crate::error::{ApiError, ApiResult};
 use crate::sandbox::LaunchRequest;
-use crate::store::{self, Event, Harness, Session, User};
+use crate::store::{self, Event, Harness, Question, Session, User};
 use anyhow::{Context, Result, anyhow};
 use hyperbeam_core::protocol::{HarnessSpec, RepoSpec, RunSpec, RunnerMsg, ServerMsg, SessionStatus, SkillSpec, event};
 use hyperbeam_core::workflow::SessionRole;
 use hyperbeam_core::{Grant, GrantSet};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
+use sqlx::types::Json;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -125,6 +126,7 @@ fn headline(kind: &str, data: &Value) -> Option<String> {
             .to_string(),
         event::SYSTEM | event::ERROR => data.get("text").and_then(Value::as_str)?.to_string(),
         event::GATEWAY => data.get("summary").and_then(Value::as_str)?.to_string(),
+        event::QUESTION => format!("Asks: {}", data.get("text").and_then(Value::as_str)?),
         _ => return None,
     };
     let line = clip(text.lines().next().unwrap_or_default(), 160);
@@ -425,6 +427,101 @@ impl App {
         Ok(())
     }
 
+    // ------------------------------------------------------------- questions
+
+    /// Record a question from an agent. It does not block the agent: the
+    /// answer is delivered later as an ordinary prompt, so the session may
+    /// end its turn, and even lose its sandbox, in the meantime. A worker's
+    /// question goes to its conductor first; anyone who can direct the worker
+    /// can still answer it. Asking again replaces the open question.
+    pub async fn ask_question(&self, session: &Session, text: &str, options: Vec<String>) -> Result<Question> {
+        let conductor = match session.parent_id {
+            Some(parent_id) => store::session_by_id(&self.db, parent_id)
+                .await?
+                .filter(|parent| !matches!(parent.status.as_str(), "cancelled" | "failed")),
+            None => None,
+        };
+        let question = Question {
+            id: Uuid::now_v7(),
+            text: text.to_string(),
+            options,
+            to: if conductor.is_some() { "conductor" } else { "team" }.to_string(),
+            asked_at: chrono::Utc::now(),
+        };
+        sqlx::query("UPDATE sessions SET question = $2 WHERE id = $1").bind(session.id).bind(Json(&question)).execute(&self.db).await?;
+        self.append_event(
+            session.id,
+            event::QUESTION,
+            json!({ "id": question.id, "text": question.text, "options": question.options, "to": question.to }),
+        )
+        .await?;
+        self.publish_session(session.id).await;
+        if conductor.is_some() {
+            let mut what = format!("has a question for you:\n\n{}\n", question.text);
+            if !question.options.is_empty() {
+                what.push_str(&format!("\nIt suggests: {}\n", question.options.join(" | ")));
+            }
+            what.push_str(
+                "\nAnswer it with `hyperbeam_message_agent`. If the decision is not yours to make, put it to the \
+                 people you work for with `hyperbeam_ask_user` and pass their answer on.",
+            );
+            self.notify_parent(session, &what).await;
+        } else {
+            self.activity(
+                None,
+                Some(session),
+                None,
+                "session.question",
+                &format!("“{}” asks: {}", session.title, clip(&question.text, 200)),
+                json!({ "question_id": question.id }),
+            )
+            .await;
+        }
+        Ok(question)
+    }
+
+    /// Mark a session's open question as dealt with. Returns whether there
+    /// was one (and, given an id, that it was that one).
+    pub async fn clear_question(&self, session_id: Uuid, question_id: Option<Uuid>) -> Result<bool> {
+        let cleared = sqlx::query(
+            "UPDATE sessions SET question = NULL
+             WHERE id = $1 AND question IS NOT NULL AND ($2::text IS NULL OR question->>'id' = $2)",
+        )
+        .bind(session_id)
+        .bind(question_id.map(|id| id.to_string()))
+        .execute(&self.db)
+        .await?
+        .rows_affected()
+            > 0;
+        if cleared {
+            self.publish_session(session_id).await;
+        }
+        Ok(cleared)
+    }
+
+    /// A person answers a session's open question. The answer becomes the
+    /// agent's next prompt, quoting the question so it still makes sense in a
+    /// fresh sandbox.
+    pub async fn answer_question(&self, session: &Session, user: &User, question_id: Option<Uuid>, text: &str) -> ApiResult<()> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(ApiError::bad("answer is empty"));
+        }
+        let Some(Json(question)) = &session.question else {
+            return Err(ApiError::bad("this agent is not waiting on a question"));
+        };
+        let stale = || ApiError::bad("that question has already been answered or replaced");
+        if question_id.is_some_and(|id| id != question.id) {
+            return Err(stale());
+        }
+        // Two people may answer at once; only the first counts.
+        if !self.clear_question(session.id, Some(question.id)).await? {
+            return Err(stale());
+        }
+        let prompt = format!("Answering your question “{}”:\n\n{text}", clip(&question.text, 500));
+        self.send_input(session, Some(user.id), &user.name, &prompt).await
+    }
+
     // ---------------------------------------------------------------- launch
 
     /// Start a sandbox for a pending session, if there is capacity. Sessions
@@ -645,6 +742,16 @@ impl App {
              team's shared notes; record durable facts worth keeping for future sessions there.\n",
         );
 
+        p.push_str(&format!(
+            "\n## Asking questions\n\
+             `hyperbeam_ask_user` puts a question to {}. Use it when a decision is theirs to make and a wrong guess \
+             would waste real work. Ask early, while you are still scoping; once you are building, prefer to state your \
+             assumption and carry on. Ask one clear question, with options to choose from where you can. \
+             The tool does not wait for the answer: finish what does not depend on it, push work worth keeping, \
+             and end your turn. The answer arrives as your next message.\n",
+            if session.parent_id.is_some() { "the conductor that started you" } else { "the people you work for" }
+        ));
+
         if !skills.is_empty() {
             p.push_str("\n## Skills\nThe team has provided these skills. Read a skill's file before doing work it covers.\n");
             for skill in skills {
@@ -668,6 +775,8 @@ impl App {
                  - End your turn after delegating. You will be prompted again each time a worker finishes a turn, with its summary.\n\
                  - `hyperbeam_list_agents` and `hyperbeam_get_agent` show progress; `hyperbeam_message_agent` sends a follow-up; `hyperbeam_stop_agent` stops one.\n\
                  - Workers can hold at most the permissions you hold.\n\
+                 - A worker may put a question to you. Answer with `hyperbeam_message_agent`; if the decision is not \
+                 yours to make, ask the people you work for with `hyperbeam_ask_user` and pass the answer on.\n\
                  When everything is done, report the outcome with links to any pull requests.\n",
             );
         } else {
@@ -877,7 +986,13 @@ impl App {
                 json!({ "stop_reason": stop_reason, "summary": clip(&summary, 400) }),
             )
             .await;
-            let report = if summary.is_empty() { "(it produced no closing message)".to_string() } else { summary };
+            let mut report = if summary.is_empty() { "(it produced no closing message)".to_string() } else { summary };
+            if let Some(Json(question)) = &session.question {
+                report.push_str(&format!(
+                    "\n\nIt is still waiting for an answer to its question: “{}”. Answer with `hyperbeam_message_agent`.",
+                    clip(&question.text, 500)
+                ));
+            }
             self.notify_parent(&session, &format!("{outcome} ({stop_reason}). Its report:\n\n{report}")).await;
         }
         self.dispatch(session_id).await;
@@ -970,7 +1085,9 @@ impl App {
         // Revoking the run token cuts the sandbox off from the gateway, the
         // git proxy and the egress proxy even if teardown is slow.
         let updated: sqlx::Result<Option<(String,)>> = sqlx::query_as(
-            "UPDATE sessions SET status = $2, error = $3, ended_at = now(), run_token_hash = NULL
+            "UPDATE sessions SET status = $2, error = $3, ended_at = now(), run_token_hash = NULL,
+                    -- An agent asleep still wants its answer; a stopped or failed one does not.
+                    question = CASE WHEN $2 = 'completed' THEN question END
              WHERE id = $1 AND status IN ('pending', 'starting', 'running', 'idle')
              RETURNING title",
         )
@@ -1131,5 +1248,6 @@ mod tests {
             Some("y")
         );
         assert_eq!(headline(event::STATUS, &json!({ "status": "idle" })), None);
+        assert_eq!(headline(event::QUESTION, &json!({ "text": "Postgres or SQLite?" })).as_deref(), Some("Asks: Postgres or SQLite?"));
     }
 }

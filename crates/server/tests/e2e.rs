@@ -655,6 +655,99 @@ async fn conductor_delegates_and_hears_back() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn agents_ask_questions_and_people_answer() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    let mia = h.member(&owner, "mia@example.com", &[]).await;
+
+    let prompt = r#"!mcp hyperbeam_ask_user {"question": "Postgres or SQLite?", "options": ["Postgres", "SQLite"]}
+!say Waiting on the database choice."#;
+    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "scripted" })).await;
+    let id = created["session"]["id"].as_str().unwrap();
+    let events = owner.wait_turns(id, 1).await;
+
+    // Asking does not block the agent: it is told to end its turn, and the
+    // question stays on the session for the team to see.
+    assert!(tool_output(&events, "hyperbeam_ask_user").contains("does not wait"));
+    let question = owner.session(id).await["question"].clone();
+    assert_eq!(question["text"], "Postgres or SQLite?");
+    assert_eq!(question["options"], json!(["Postgres", "SQLite"]));
+    assert_eq!(question["to"], "team");
+    let asked: Vec<&Value> = events.iter().filter(|e| e["kind"] == "question").collect();
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0]["data"]["id"], question["id"]);
+    // It is logged as a question, not also as a gateway call.
+    assert!(!events.iter().any(|e| e["kind"] == "gateway" && e["data"]["tool"] == "hyperbeam_ask_user"));
+
+    // Answering directs the agent, so it takes the standing a message does.
+    let answer = format!("/sessions/{id}/answer");
+    assert_eq!(mia.call(Method::POST, &answer, Some(json!({ "text": "SQLite" }))).await.0, StatusCode::FORBIDDEN);
+    // An answer aimed at some other question is refused.
+    let (status, body) = owner.call(Method::POST, &answer, Some(json!({ "text": "SQLite", "question_id": uuid::Uuid::new_v4() }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(owner.session(id).await["question"]["id"], question["id"]);
+
+    owner.post(&answer, json!({ "text": "Postgres", "question_id": question["id"] })).await;
+    let events = owner.wait_turns(id, 2).await;
+    assert_eq!(owner.session(id).await["question"], Value::Null);
+    let delivered = events.iter().rev().find(|e| e["kind"] == "user_message").unwrap()["data"]["text"].as_str().unwrap();
+    assert!(delivered.contains("Postgres or SQLite?") && delivered.ends_with("Postgres"), "{delivered}");
+    // Only the first answer counts.
+    assert_eq!(owner.call(Method::POST, &answer, Some(json!({ "text": "SQLite" }))).await.0, StatusCode::BAD_REQUEST);
+
+    // A plain reply settles a question too.
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": "!mcp hyperbeam_ask_user {\"question\": \"Ship it?\"}" })).await;
+    owner.wait_turns(id, 3).await;
+    assert_eq!(owner.session(id).await["question"]["text"], "Ship it?");
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": "!say Shipping." })).await;
+    owner.wait_turns(id, 4).await;
+    assert_eq!(owner.session(id).await["question"], Value::Null);
+
+    // A stopped agent is no longer asking.
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": "!mcp hyperbeam_ask_user {\"question\": \"Anything else?\"}" })).await;
+    owner.wait_turns(id, 5).await;
+    assert_eq!(owner.session(id).await["question"]["text"], "Anything else?");
+    owner.post(&format!("/sessions/{id}/stop"), json!({})).await;
+    assert_eq!(owner.session(id).await["question"], Value::Null);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workers_question_goes_to_its_conductor() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    let prompt = r#"!mcp hyperbeam_spawn_agent {"title": "Deploy", "prompt": "!mcp hyperbeam_ask_user {\"question\": \"Which region?\"}"}"#;
+    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "scripted", "role": "conductor" })).await;
+    let id = created["session"]["id"].as_str().unwrap();
+
+    // The conductor is prompted with the question, and reminded of it when
+    // the worker's turn ends with it still open.
+    let told = |events: &[Value], needle: &str| {
+        events.iter().any(|e| e["kind"] == "user_message" && e["data"]["author"] == "Hyperbeam" && e["data"]["text"].as_str().is_some_and(|t| t.contains(needle)))
+    };
+    let mut events = Vec::new();
+    for _ in 0..300 {
+        events = owner.events(id).await;
+        if told(&events, "has a question for you") && told(&events, "still waiting for an answer") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(told(&events, "has a question for you") && told(&events, "Which region?"), "{events:#?}");
+    assert!(told(&events, "still waiting for an answer"), "{events:#?}");
+
+    let detail = owner.get(&format!("/sessions/{id}")).await;
+    let child_id = detail["children"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(owner.session(&child_id).await["question"]["to"], "conductor");
+
+    // The conductor's next message to the worker is the answer.
+    let reply = format!("!mcp hyperbeam_message_agent {{\"id\": \"{child_id}\", \"text\": \"!say Deploying to eu-west.\"}}");
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": reply })).await;
+    let events = owner.wait_turns(&child_id, 2).await;
+    assert_eq!(owner.session(&child_id).await["question"], Value::Null);
+    assert!(text_of(&events, "agent_message").contains("Deploying to eu-west."));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn only_people_who_could_have_launched_an_agent_may_direct_it() {
     let Some(h) = Harness::start().await else { return };
     let owner = h.owner().await;

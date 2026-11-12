@@ -228,8 +228,21 @@ export function StatusDot({ status, className }: { status: SessionStatus; classN
   );
 }
 
-export function StatusBadge({ session }: { session: Pick<Session, "status"> }) {
+export function StatusBadge({ session }: { session: Pick<Session, "status" | "question"> }) {
   const tone = STATUS_TONE[session.status];
+  // A question outranks the lifecycle state: it is what the agent needs next,
+  // whether it is still working, waiting, or asleep.
+  if (session.question) {
+    const toConductor = session.question.to === "conductor";
+    return (
+      <Tooltip content={toConductor ? "The agent asked its conductor a question. You can answer it too." : "The agent asked a question and is waiting for an answer."}>
+        <Badge tone="wait">
+          <span className="size-1.5 rounded-full bg-wait" />
+          {toConductor ? "Asked its conductor" : "Has a question"}
+        </Badge>
+      </Tooltip>
+    );
+  }
   return (
     <Tooltip content={STATUS_HELP[session.status]}>
       <Badge tone={tone}>

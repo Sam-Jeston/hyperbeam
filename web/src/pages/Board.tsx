@@ -32,7 +32,7 @@ export function Board() {
 
   const visible = Object.values(workstreams).filter((w) => w.status !== "archived");
   const loose = Object.values(sessions)
-    .filter((s) => !s.workstream_id && !s.parent_id && isLive(s))
+    .filter((s) => !s.workstream_id && !s.parent_id && (isLive(s) || s.question))
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const weekAgo = Date.now() - 7 * 86400_000;
   const empty = visible.length === 0 && loose.length === 0;
@@ -108,6 +108,8 @@ function WorkstreamCard({ workstream, sessions }: { workstream: Workstream; sess
   const people = [...new Set([workstream.created_by, ...sessions.map((s) => s.created_by)])];
   const prs = workstream.links.filter((l) => l.kind === "pull_request");
   const needsYou = live.some((s) => s.status === "idle");
+  // Questions put to people; one a worker put to its conductor is the conductor's to handle.
+  const asking = sessions.filter((s) => s.question?.to === "team").length;
   return (
     <A href={`/w/${workstream.id}`} className="block rounded-lg focus-visible:outline-2 focus-visible:outline-ring">
       <Card interactive className="grid gap-2.5 p-3 shadow-[0_1px_0_hsl(var(--shadow-color)/0.06)]">
@@ -135,7 +137,7 @@ function WorkstreamCard({ workstream, sessions }: { workstream: Workstream; sess
         )}
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[12px] text-faint">
-            {needsYou && <Badge tone="idle">Needs a reply</Badge>}
+            {asking > 0 ? <Badge tone="wait">{asking > 1 ? `${asking} questions` : "Has a question"}</Badge> : needsYou && <Badge tone="idle">Needs a reply</Badge>}
             {prs.length > 0 && <Badge tone="primary"><GitPullRequest /> {prs.length}</Badge>}
             {sessions.length > 0 && live.length === 0 && <span>{sessions.length} agent{sessions.length > 1 ? "s" : ""}</span>}
             <Time iso={workstream.updated_at} />
@@ -153,6 +155,7 @@ const plain = (line: string) => line.replace(/\*\*|`/g, "").replace(/^#+\s*/, ""
 export function AgentRow({ session, child }: { session: Session; child?: boolean }) {
   const users = useStore((s) => s.users);
   const line =
+    session.question ? `Asks: ${session.question.text}` :
     session.status === "running" ? session.headline :
     session.status === "failed" ? session.error ?? "" :
     plain(session.summary.split("\n").find((l) => l.trim()) ?? session.headline);
@@ -168,7 +171,7 @@ export function AgentRow({ session, child }: { session: Session; child?: boolean
           <span className="truncate text-[13.5px] font-medium">{session.title}</span>
           {session.role === "conductor" && <Badge tone="primary">Conductor</Badge>}
         </div>
-        {line && <div className={cn("truncate text-[12.5px]", session.status === "failed" ? "text-fail" : "text-muted")}>{line}</div>}
+        {line && <div className={cn("truncate text-[12.5px]", session.question ? "text-wait" : session.status === "failed" ? "text-fail" : "text-muted")}>{line}</div>}
       </div>
       {prs.length > 0 && <Badge tone="primary"><GitPullRequest /> PR</Badge>}
       <Time iso={session.last_activity_at} className="hidden text-[12px] text-faint sm:inline" />

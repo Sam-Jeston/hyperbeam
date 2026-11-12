@@ -134,6 +134,21 @@ pub struct Workstream {
     pub updated_at: DateTime<Utc>,
 }
 
+/// A question an agent asked with `hyperbeam_ask_user` that nobody has
+/// answered yet.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Question {
+    pub id: Uuid,
+    pub text: String,
+    /// Answers the agent suggested. People may always answer in their own words.
+    #[serde(default)]
+    pub options: Vec<String>,
+    /// Who is expected to answer: `team`, or `conductor` for a worker whose
+    /// conductor is told first.
+    pub to: String,
+    pub asked_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct Session {
     pub id: Uuid,
@@ -155,6 +170,8 @@ pub struct Session {
     pub headline: String,
     pub summary: String,
     pub error: Option<String>,
+    /// The open question, if the agent is waiting on an answer.
+    pub question: Option<Json<Question>>,
     pub event_seq: i64,
     pub launches: i32,
     pub created_at: DateTime<Utc>,
@@ -164,7 +181,7 @@ pub struct Session {
 }
 
 pub const SESSION_COLUMNS: &str = "id, workstream_id, parent_id, title, role, status, harness_id, created_by, \
-     workflow, repos, skills, grants, work_branch, model, links, headline, summary, error, event_seq, launches, \
+     workflow, repos, skills, grants, work_branch, model, links, headline, summary, error, question, event_seq, launches, \
      created_at, started_at, ended_at, last_activity_at";
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]

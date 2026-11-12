@@ -112,6 +112,8 @@ pub mod event {
     pub const TOOL_CALL_UPDATE: &str = "tool_call_update";
     pub const PLAN: &str = "plan";
     pub const PERMISSION: &str = "permission";
+    /// The agent asked the people it works for (or its conductor) a question.
+    pub const QUESTION: &str = "question";
     /// Session lifecycle transition.
     pub const STATUS: &str = "status";
     /// Platform notice (workspace setup, relaunch, teardown).

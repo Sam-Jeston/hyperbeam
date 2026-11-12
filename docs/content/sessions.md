@@ -24,6 +24,18 @@ Type in the box at the bottom and press <kbd>Enter</kbd> to send (<kbd>Shift</kb
 - If it is **working**, your message is queued and delivered when the turn ends.
 - If it is **asleep**, your message wakes it in a fresh sandbox.
 
+## Questions from the agent
+
+An agent can ask a question when a decision is yours to make. The question appears in the transcript, the session shows **Has a question**, and its workstream's card on the board shows the same.
+
+- If the agent offered options, select one to answer. You can always type an answer in your own words instead.
+- Any message you send while a question is open counts as the reply.
+- The agent does not block while it waits. It finishes what it can and ends its turn, and your answer starts its next one. If its sandbox has shut down in the meantime, the answer wakes it in a fresh one.
+
+A worker started by a [conductor](/conductor) asks its conductor first. The session shows **Asked its conductor**, and you can still answer it yourself.
+
+Answering directs the agent, so it needs the same standing as sending a message. See [Who can direct an agent](#who-can-direct-an-agent).
+
 ## Interrupt or stop
 
 - **Interrupt** ends the current turn. The agent stays alive and waits for your next message.

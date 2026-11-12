@@ -394,7 +394,28 @@ pub struct MessageBody {
 pub async fn send_message(State(app): State<App>, AuthUser(user): AuthUser, Path(id): Path<Uuid>, Json(body): Json<MessageBody>) -> ApiResult<Json<Value>> {
     let session = load_session(&app, id).await?;
     require_drive(&user, &session)?;
+    if !body.text.trim().is_empty() {
+        // A person who writes to an agent that is waiting on a question has
+        // seen it; whatever they say is the reply.
+        app.clear_question(session.id, None).await?;
+    }
     app.send_input(&session, Some(user.id), &user.name, &body.text).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct AnswerBody {
+    text: String,
+    /// The question being answered, so a stale page cannot answer a newer one.
+    question_id: Option<Uuid>,
+}
+
+/// Answer the question an agent asked with `hyperbeam_ask_user`. Answering
+/// directs the agent, so it takes the same standing as sending a message.
+pub async fn answer_question(State(app): State<App>, AuthUser(user): AuthUser, Path(id): Path<Uuid>, Json(body): Json<AnswerBody>) -> ApiResult<Json<Value>> {
+    let session = load_session(&app, id).await?;
+    require_drive(&user, &session)?;
+    app.answer_question(&session, &user, body.question_id, &body.text).await?;
     Ok(Json(json!({ "ok": true })))
 }
 

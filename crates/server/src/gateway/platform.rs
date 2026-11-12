@@ -1,5 +1,6 @@
-//! Tools for the platform itself: shared team notes, workstream updates, and
-//! (for conductors) managing worker agents.
+//! Tools for the platform itself: shared team notes, workstream updates,
+//! questions to the people an agent works for, and (for conductors) managing
+//! worker agents.
 
 use super::{ToolDef, ToolError, ToolOutput, ToolResult, arg_list, arg_opt, arg_str, schema};
 use crate::app::App;
@@ -12,6 +13,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 const MAX_MEMORY_BYTES: usize = 64 * 1024;
+const MAX_QUESTION_CHARS: usize = 2000;
 
 pub fn tools() -> Vec<ToolDef> {
     let tool = |name, description, schema, conductor_only| ToolDef { name, description, schema, grant: None, conductor_only };
@@ -31,6 +33,17 @@ pub fn tools() -> Vec<ToolDef> {
                 ("status", "string", "scoping, building, review or done", false),
                 ("link_title", "string", "Title of a link to attach", false),
                 ("link_url", "string", "URL of the link to attach", false),
+            ]),
+            false,
+        ),
+        tool(
+            "hyperbeam_ask_user",
+            "Put a question to whoever directs this session: the people you work for, or your conductor if one started you. \
+             Use it for decisions that are theirs to make, not for things you can find out yourself. It does not wait: \
+             the answer arrives later as your next message, so push your work and end your turn after asking.",
+            schema(&[
+                ("question", "string", "One clear question, with the context needed to answer it", true),
+                ("options", "string[]", "Up to six short answers to choose from. People can always answer in their own words.", false),
             ]),
             false,
         ),
@@ -166,6 +179,25 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             app.publish("workstream", None, json!({ "id": ws }));
             Ok(ToolOutput::new("workstream", format!("Workstream updated: {}.", done.join(", "))))
         }
+        "hyperbeam_ask_user" => {
+            let text = arg_str(args, "question")?;
+            if text.chars().count() > MAX_QUESTION_CHARS {
+                return Err(ToolError::Failed(format!("question is too long (limit {MAX_QUESTION_CHARS} characters); put the detail in your message and ask something short")));
+            }
+            let options: Vec<String> = arg_list(args, "options").iter().map(|o| o.trim().to_string()).filter(|o| !o.is_empty()).collect();
+            if options.len() > 6 || options.iter().any(|o| o.chars().count() > 200) {
+                return Err(ToolError::Failed("give at most six options of at most 200 characters each".into()));
+            }
+            let question = app.ask_question(session, text, options).await?;
+            let who = if question.to == "conductor" { "your conductor" } else { "the people you work for" };
+            Ok(ToolOutput::new(
+                text.chars().take(120).collect::<String>(),
+                format!(
+                    "Question sent to {who}. This call does not wait for the answer: finish anything that does not depend on it, \
+                     push work worth keeping, then end your turn. The answer will arrive as your next message. Do not ask it again."
+                ),
+            ))
+        }
         "hyperbeam_spawn_agent" => {
             let title = arg_str(args, "title")?;
             let prompt = arg_str(args, "prompt")?;
@@ -235,6 +267,8 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
         "hyperbeam_message_agent" => {
             let agent = child(app, session, args).await?;
             let text = arg_str(args, "text")?;
+            // Whatever the conductor says next is its answer to a waiting worker.
+            app.clear_question(agent.id, None).await?;
             app.send_input(&agent, None, &format!("{} (conductor)", session.title), text).await?;
             Ok(ToolOutput::new(agent.title, "Message delivered. You will be prompted when the agent finishes its turn.".to_string()))
         }

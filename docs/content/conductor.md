@@ -19,6 +19,10 @@ A worker started by a conductor can hold at most what the conductor holds. If th
 
 Workers use the conductor’s model unless the conductor chooses another for a piece of work.
 
+## Questions from workers
+
+When a worker asks a question, its conductor is prompted with it and answers by messaging the worker. If the decision is not the conductor's to make, it asks you instead and passes your answer on. You can also answer a worker directly from its page. See [Questions from the agent](/sessions#questions-from-the-agent).
+
 ## Following the work
 
 Workers appear on the conductor’s page under **Agents it started**, and nested under the conductor on the workstream’s page. Each worker has its own page, transcript and sandbox, so you can watch or direct any of them.

@@ -320,8 +320,12 @@ pub async fn handle(State(app): State<App>, parts: Parts, Json(request): Json<Va
                 Err(ToolError::Denied(why)) => (format!("Denied: {why}"), aimed_at(&args), false, true, None),
                 Err(ToolError::Failed(why)) => (format!("Error: {why}"), aimed_at(&args), true, true, None),
             };
-            // Reads of the platform's own state are not worth a log line each.
-            let quiet = matches!(name.as_str(), "hyperbeam_memory_list" | "hyperbeam_memory_read" | "hyperbeam_list_agents" | "hyperbeam_get_agent") && !failed;
+            // Reads of the platform's own state are not worth a log line each,
+            // and a question is shown in the log as itself.
+            let quiet = matches!(
+                name.as_str(),
+                "hyperbeam_memory_list" | "hyperbeam_memory_read" | "hyperbeam_list_agents" | "hyperbeam_get_agent" | "hyperbeam_ask_user"
+            ) && !failed;
             let detail = if failed { text.chars().take(500).collect::<String>() } else { String::new() };
             store::record_audit(&app.db, &session, &name, &target, allowed, &detail).await.ok();
             if !quiet {

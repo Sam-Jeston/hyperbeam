@@ -296,6 +296,12 @@ impl Printer {
                 let mark = if data["allowed"] == false { "⛔" } else { "✓" };
                 self.line(&format!("  {mark} {}", data["summary"].as_str().unwrap_or("")));
             }
+            "question" => {
+                self.line(&format!("  ? {}", data["text"].as_str().unwrap_or("")));
+                for option in data["options"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                    self.line(&format!("      - {option}"));
+                }
+            }
             "system" => self.line(&format!("  · {}", data["text"].as_str().unwrap_or(""))),
             "error" => self.line(&format!("  ✗ {}", data["text"].as_str().unwrap_or(""))),
             "turn_end" => {
@@ -438,11 +444,17 @@ async fn run() -> Result<()> {
                 println!("{}", if all { "No sessions yet." } else { "No agents are running. Use --all to see past sessions." });
             }
             for session in list {
-                let headline = if session["status"] == "running" { session["headline"].as_str() } else { session["summary"].as_str() };
+                // An open question is what the agent needs next, whatever its state.
+                let question = session["question"]["text"].as_str().map(|q| format!("asks: {q}"));
+                let headline = match &question {
+                    Some(question) => Some(question.as_str()),
+                    None if session["status"] == "running" => session["headline"].as_str(),
+                    None => session["summary"].as_str(),
+                };
                 println!(
                     "{}  {:<9} {}{}",
                     short(session["id"].as_str().unwrap_or("")),
-                    session["status"].as_str().unwrap_or(""),
+                    if question.is_some() { "asking" } else { session["status"].as_str().unwrap_or("") },
                     first_line(session["title"].as_str().unwrap_or("")),
                     headline.map(first_line).filter(|h| !h.is_empty()).map(|h| format!("\n          {h}")).unwrap_or_default(),
                 );

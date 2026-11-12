@@ -1,7 +1,7 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import {
   ArrowDown, ChevronRight, CircleCheck, CircleStop, CircleX, ExternalLink, FilePen, FileText, FolderGit2, Globe, Hand, Lightbulb,
-  Loader2, Search, SendHorizontal, ShieldCheck, ShieldX, Terminal, Trash2, Wrench,
+  Loader2, MessageCircleQuestion, Search, SendHorizontal, ShieldCheck, ShieldX, Terminal, Trash2, Wrench,
 } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BrandMark } from "../components/ui/brand";
@@ -9,7 +9,7 @@ import { Button } from "../components/ui/button";
 import { confirm } from "../components/ui/dialog";
 import { Kbd } from "../components/ui/input";
 import { Badge, Card, KeyValues, Notice, Panel, Skeleton } from "../components/ui/surface";
-import { api, isLive, type Session, type SessionEvent } from "../lib/api";
+import { api, isLive, type Question, type Session, type SessionEvent } from "../lib/api";
 import { useStore } from "../lib/store";
 import { A, Avatar, clock, ErrorNote, Ext, Markdown, Page, PageHeader, StatusBadge, Time, useAction, useDocumentTitle, useLoad, useTick } from "../lib/ui";
 import { cn } from "../lib/utils";
@@ -30,6 +30,7 @@ type Item =
   | { type: "thought"; key: number; text: string }
   | { type: "tool"; key: number; data: any }
   | { type: "gate"; key: number; data: any }
+  | { type: "question"; key: number; id: string; text: string; options: string[]; to: string }
   | { type: "note"; key: number; text: string; rule?: boolean }
   | { type: "error"; key: number; text: string };
 
@@ -74,6 +75,9 @@ function fold(events: SessionEvent[]): { items: Item[]; plan: any[] | null } {
         break;
       case "gateway":
         items.push({ type: "gate", key: seq, data });
+        break;
+      case "question":
+        items.push({ type: "question", key: seq, id: data.id, text: data.text ?? "", options: Array.isArray(data.options) ? data.options : [], to: data.to ?? "team" });
         break;
       case "system":
         items.push({ type: "note", key: seq, text: data.text ?? "" });
@@ -221,7 +225,20 @@ export function SessionPage({ id }: { id: string }) {
         <div className="flex min-h-[calc(100dvh-180px)] min-w-0 flex-col">
           <div className="grid flex-1 content-start gap-3.5 pb-4" aria-live="polite" aria-busy={!caughtUp}>
             {!caughtUp && items.length === 0 && <TranscriptSkeleton />}
-            {items.map((item) => <TranscriptItem key={item.key} item={item} />)}
+            {items.map((item) =>
+              item.type === "question" ? (
+                <QuestionCard
+                  key={item.key}
+                  sessionId={id}
+                  question={item}
+                  open={session.question?.id === item.id}
+                  canAnswer={data.can_drive}
+                  onAnswered={() => (stuck.current = true)}
+                />
+              ) : (
+                <TranscriptItem key={item.key} item={item} />
+              ),
+            )}
             {session.status === "running" && (
               <div className="flex items-center gap-2 text-[13px] text-muted">
                 <Loader2 className="size-3.5 animate-spin text-run" /> Working
@@ -254,7 +271,9 @@ export function SessionPage({ id }: { id: string }) {
             {data.can_drive ? (
               <MessageComposer
                 sessionId={id}
+                question={session.question}
                 placeholder={
+                  session.question ? "Answer in your own words" :
                   live
                     ? session.status === "running" ? "Queue a follow-up for when this turn ends" : "Reply to the agent"
                     : "Send a message to wake this agent in a fresh sandbox"
@@ -320,7 +339,46 @@ export function SessionPage({ id }: { id: string }) {
   );
 }
 
-function MessageComposer({ sessionId, placeholder, onSent }: { sessionId: string; placeholder: string; onSent: () => void }) {
+/** A question the agent asked. While it is open, its options are one-click answers. */
+function QuestionCard(props: {
+  sessionId: string;
+  question: { id: string; text: string; options: string[]; to: string };
+  open: boolean;
+  canAnswer: boolean;
+  onAnswered: () => void;
+}) {
+  const { question, open } = props;
+  const action = useAction();
+  const answer = (text: string) =>
+    void action.run(async () => {
+      await api.post(`/sessions/${props.sessionId}/answer`, { text, question_id: question.id });
+      props.onAnswered();
+    });
+  return (
+    <div className={cn("grid gap-2.5 rounded-lg border px-3.5 py-3", open ? "border-wait/40 bg-wait/8" : "border-border bg-surface-2/50")}>
+      <div className={cn("flex items-center gap-1.5 text-[12px] font-medium", open ? "text-wait" : "text-muted")}>
+        <MessageCircleQuestion className="size-3.5" />
+        {question.to === "conductor" ? "Question for its conductor" : "Question"}
+        {!open && <span className="font-normal text-faint">· no longer open</span>}
+      </div>
+      <Markdown text={question.text} className="max-w-[78ch] text-[14px]" />
+      {open && props.canAnswer && question.options.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {question.options.map((option) => (
+            <Button key={option} size="sm" disabled={action.busy} onClick={() => answer(option)} className="h-auto min-h-7 max-w-full py-1 text-left whitespace-normal">
+              {option}
+            </Button>
+          ))}
+        </div>
+      )}
+      {!open && question.options.length > 0 && <div className="text-[12.5px] text-faint">Offered: {question.options.join(" · ")}</div>}
+      {open && props.canAnswer && <div className="text-[12.5px] text-muted">{question.options.length > 0 ? "Pick one, or answer in your own words below." : "Answer below."}</div>}
+      <ErrorNote error={action.error} />
+    </div>
+  );
+}
+
+function MessageComposer({ sessionId, question, placeholder, onSent }: { sessionId: string; question?: Question | null; placeholder: string; onSent: () => void }) {
   const [text, setText] = useState("");
   const action = useAction();
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -335,7 +393,9 @@ function MessageComposer({ sessionId, placeholder, onSent }: { sessionId: string
     const message = text.trim();
     if (!message || action.busy) return;
     void action.run(async () => {
-      await api.post(`/sessions/${sessionId}/messages`, { text: message });
+      // While a question is open, what is typed here is the answer to it.
+      if (question) await api.post(`/sessions/${sessionId}/answer`, { text: message, question_id: question.id });
+      else await api.post(`/sessions/${sessionId}/messages`, { text: message });
       setText("");
       onSent();
     });
@@ -363,7 +423,7 @@ function MessageComposer({ sessionId, placeholder, onSent }: { sessionId: string
             <Kbd>Enter</Kbd> to send · <Kbd>Shift</Kbd><Kbd>Enter</Kbd> for a new line
           </span>
           <Button variant="primary" size="sm" className="ml-auto" disabled={!text.trim()} loading={action.busy} onClick={send}>
-            {!action.busy && <SendHorizontal />} Send
+            {!action.busy && <SendHorizontal />} {question ? "Answer" : "Send"}
           </Button>
         </div>
       </div>

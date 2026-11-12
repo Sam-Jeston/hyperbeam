@@ -57,6 +57,17 @@ export interface Link {
 
 export type SessionStatus = "pending" | "starting" | "running" | "idle" | "completed" | "failed" | "cancelled";
 
+/** A question an agent asked with `hyperbeam_ask_user` that nobody has answered yet. */
+export interface Question {
+  id: string;
+  text: string;
+  /** Answers the agent suggested; people may always answer in their own words. */
+  options: string[];
+  /** A worker's question goes to its conductor first. */
+  to: "team" | "conductor";
+  asked_at: string;
+}
+
 export interface Session {
   id: string;
   workstream_id: string | null;
@@ -76,6 +87,8 @@ export interface Session {
   headline: string;
   summary: string;
   error: string | null;
+  /** Set while the agent is waiting on an answer, even after its sandbox has shut down. */
+  question: Question | null;
   launches: number;
   created_at: string;
   started_at: string | null;
