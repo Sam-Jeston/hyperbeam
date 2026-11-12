@@ -78,11 +78,10 @@ impl Reporter {
     }
 
     fn flush(&mut self) {
-        if let Some((kind, text)) = self.buffer.take() {
-            if !text.is_empty() {
+        if let Some((kind, text)) = self.buffer.take()
+            && !text.is_empty() {
                 let _ = self.tx.send(RunnerMsg::Event { kind: kind.to_string(), data: json!({ "text": text }) });
             }
-        }
     }
 }
 
@@ -173,8 +172,8 @@ async fn drive(cfg: &Config, spec: &RunSpec, link: &mut Link) -> Result<()> {
     let mut flush = tokio::time::interval(FLUSH_INTERVAL);
 
     loop {
-        if active.is_none() {
-            if let Some((input_id, text)) = queue.pop_front() {
+        if active.is_none()
+            && let Some((input_id, text)) = queue.pop_front() {
                 let text = if std::mem::take(&mut first_prompt) && !spec.preamble.is_empty() {
                     format!("{}\n\n---\n\n{}", spec.preamble, text)
                 } else {
@@ -191,7 +190,6 @@ async fn drive(cfg: &Config, spec: &RunSpec, link: &mut Link) -> Result<()> {
                     let _ = turn_tx.send((input_id, result));
                 });
             }
-        }
 
         tokio::select! {
             msg = link.rx.recv() => match msg {

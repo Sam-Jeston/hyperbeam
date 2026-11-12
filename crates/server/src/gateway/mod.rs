@@ -225,14 +225,13 @@ async fn call_tool(app: &App, session: &Session, name: &str, args: &Value) -> To
             None => Err(ToolError::Failed(format!("no tool named `{name}`"))),
         };
     };
-    if let Some(grant) = &tool.grant {
-        if !session.grants.has(grant) {
+    if let Some(grant) = &tool.grant
+        && !session.grants.has(grant) {
             return Err(ToolError::Denied(format!(
                 "this session does not hold `{grant}` ({}). Its permissions come from the person who started it.",
                 grant.label()
             )));
         }
-    }
     if tool.conductor_only && session.role != "conductor" {
         return Err(ToolError::Denied("only conductor sessions can manage other agents".into()));
     }

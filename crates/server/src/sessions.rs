@@ -181,11 +181,10 @@ impl App {
     }
 
     pub async fn publish_session(&self, session_id: Uuid) {
-        if let Ok(Some(session)) = store::session_by_id(&self.db, session_id).await {
-            if let Ok(payload) = serde_json::to_value(&session) {
+        if let Ok(Some(session)) = store::session_by_id(&self.db, session_id).await
+            && let Ok(payload) = serde_json::to_value(&session) {
                 self.publish("session", Some(session_id), payload);
             }
-        }
     }
 
     pub async fn activity(

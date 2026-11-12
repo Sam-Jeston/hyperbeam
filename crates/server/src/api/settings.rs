@@ -352,16 +352,14 @@ fn model_settings(
     let models = clean_models(models)?;
     let default_model = default_model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty());
     let model_env = model_env.map(|m| m.trim().to_string()).filter(|m| !m.is_empty());
-    if let Some(default) = &default_model {
-        if !models.is_empty() && !models.iter().any(|m| &m.id == default) {
+    if let Some(default) = &default_model
+        && !models.is_empty() && !models.iter().any(|m| &m.id == default) {
             return Err(ApiError::bad(format!("the default model `{default}` is not in the allowed list")));
         }
-    }
-    if let Some(var) = &model_env {
-        if !valid_env_name(var) {
+    if let Some(var) = &model_env
+        && !valid_env_name(var) {
             return Err(ApiError::bad(format!("`{var}` is not a valid environment variable name")));
         }
-    }
     Ok((models, default_model, model_env))
 }
 

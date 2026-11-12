@@ -43,11 +43,10 @@ impl ApiError {
 
 impl From<sqlx::Error> for ApiError {
     fn from(err: sqlx::Error) -> Self {
-        if let sqlx::Error::Database(db) = &err {
-            if db.is_unique_violation() {
+        if let sqlx::Error::Database(db) = &err
+            && db.is_unique_violation() {
                 return ApiError::Conflict("that name is already in use".into());
             }
-        }
         ApiError::Internal(err.into())
     }
 }

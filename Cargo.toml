@@ -5,7 +5,7 @@ members = ["crates/core", "crates/server", "crates/runner", "crates/cli", "crate
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.99"
 license = "Apache-2.0"
 repository = "https://github.com/hyperbeam/hyperbeam"
 

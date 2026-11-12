@@ -98,15 +98,14 @@ pub fn spawn(command: &[String], env: &BTreeMap<String, String>, cwd: &Path) -> 
                 (Some(method), Some(id)) => in_tx.send(Incoming::Request { id, method, params }),
                 (Some(method), None) => in_tx.send(Incoming::Notification { method, params }),
                 (None, Some(id)) => {
-                    if let Some(n) = id.as_u64() {
-                        if let Some(tx) = reader_pending.lock().await.remove(&n) {
+                    if let Some(n) = id.as_u64()
+                        && let Some(tx) = reader_pending.lock().await.remove(&n) {
                             let result = match msg.get("error") {
                                 Some(err) if !err.is_null() => Err(err.clone()),
                                 _ => Ok(msg.get("result").cloned().unwrap_or(Value::Null)),
                             };
                             let _ = tx.send(result);
                         }
-                    }
                     Ok(())
                 }
                 (None, None) => Ok(()),

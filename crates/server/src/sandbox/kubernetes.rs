@@ -180,11 +180,10 @@ impl SandboxDriver for KubernetesDriver {
         let pods: Api<Pod> = Api::namespaced(self.client.clone(), &self.namespace);
         let secrets: Api<Secret> = Api::namespaced(self.client.clone(), &self.namespace);
         let gone = |err: &kube::Error| matches!(err, kube::Error::Api(e) if e.code == 404);
-        if let Err(err) = secrets.delete(&name, &DeleteParams::default()).await {
-            if !gone(&err) {
+        if let Err(err) = secrets.delete(&name, &DeleteParams::default()).await
+            && !gone(&err) {
                 tracing::warn!("could not delete secret {name}: {err}");
             }
-        }
         match pods.delete(&name, &DeleteParams::default().grace_period(5)).await {
             Ok(_) => Ok(()),
             Err(err) if gone(&err) => Ok(()),

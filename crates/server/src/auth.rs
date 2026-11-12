@@ -22,11 +22,10 @@ pub fn bearer(parts: &Parts) -> Option<String> {
 fn cookie(parts: &Parts) -> Option<String> {
     for header in parts.headers.get_all(COOKIE) {
         for pair in header.to_str().ok()?.split(';') {
-            if let Some((name, value)) = pair.trim().split_once('=') {
-                if name == COOKIE_NAME {
+            if let Some((name, value)) = pair.trim().split_once('=')
+                && name == COOKIE_NAME {
                     return Some(value.to_string());
                 }
-            }
         }
     }
     None

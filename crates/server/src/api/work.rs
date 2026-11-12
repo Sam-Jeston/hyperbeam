@@ -112,16 +112,14 @@ pub async fn update_workstream(
 ) -> ApiResult<Json<Value>> {
     let current: Workstream =
         sqlx::query_as("SELECT * FROM workstreams WHERE id = $1").bind(id).fetch_optional(&app.db).await?.ok_or(ApiError::NotFound("workstream"))?;
-    if let Some(status) = &body.status {
-        if !WORKSTREAM_STATUSES.contains(&status.as_str()) {
+    if let Some(status) = &body.status
+        && !WORKSTREAM_STATUSES.contains(&status.as_str()) {
             return Err(ApiError::bad("unknown workstream status"));
         }
-    }
-    if let Some(links) = &body.links {
-        if links.iter().any(|l| !(l.url.starts_with("https://") || l.url.starts_with("http://"))) {
+    if let Some(links) = &body.links
+        && links.iter().any(|l| !(l.url.starts_with("https://") || l.url.starts_with("http://"))) {
             return Err(ApiError::bad("links must be http(s) URLs"));
         }
-    }
     let title = body.title.as_deref().map(str::trim).filter(|t| !t.is_empty()).unwrap_or(&current.title).to_string();
     let workstream: Workstream = sqlx::query_as(
         "UPDATE workstreams SET title = $2, description = $3, status = $4, links = $5, updated_at = now() WHERE id = $1 RETURNING *",

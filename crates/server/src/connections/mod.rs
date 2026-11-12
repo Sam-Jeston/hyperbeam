@@ -340,8 +340,8 @@ impl App {
             return Ok(());
         }
         let preset = presets::find("linear").expect("linear preset");
-        if by_name(&self.db, "linear").await?.is_none() {
-            if let Some(secret) = store::get_secret(&self.db, &self.secrets, "integration/linear").await? {
+        if by_name(&self.db, "linear").await?.is_none()
+            && let Some(secret) = store::get_secret(&self.db, &self.secrets, "integration/linear").await? {
                 store::put_secret(&self.db, &self.secrets, &secret_key("linear"), &secret).await?;
                 sqlx::query(
                     "INSERT INTO connections (name, preset, title, url, auth) VALUES ('linear', 'linear', $1, $2, $3) ON CONFLICT DO NOTHING",
@@ -353,7 +353,6 @@ impl App {
                 .await?;
                 tracing::info!("moved the Linear integration to the Linear MCP connection");
             }
-        }
         sqlx::query("DELETE FROM integrations WHERE kind = 'linear'").execute(&self.db).await?;
         store::delete_secret(&self.db, "integration/linear").await?;
         Ok(())

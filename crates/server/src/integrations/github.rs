@@ -52,11 +52,10 @@ impl App {
         }
 
         let cache_key = format!("{}|{:?}", repo.to_lowercase(), access);
-        if let Some((token, expires)) = self.github_tokens.cache.lock().unwrap().get(&cache_key) {
-            if *expires > Instant::now() {
+        if let Some((token, expires)) = self.github_tokens.cache.lock().unwrap().get(&cache_key)
+            && *expires > Instant::now() {
                 return Ok(token.clone());
             }
-        }
         let app_id = match config.get("app_id") {
             Some(Value::String(s)) => s.clone(),
             Some(Value::Number(n)) => n.to_string(),

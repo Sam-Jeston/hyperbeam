@@ -118,14 +118,13 @@ pub async fn login(State(app): State<App>, Json(body): Json<LoginBody>) -> ApiRe
 pub async fn logout(State(app): State<App>, parts: axum::http::request::Parts) -> ApiResult<Response> {
     let cookies = parts.headers.get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok()).unwrap_or_default();
     for pair in cookies.split(';') {
-        if let Some((name, value)) = pair.trim().split_once('=') {
-            if name == auth::COOKIE_NAME {
+        if let Some((name, value)) = pair.trim().split_once('=')
+            && name == auth::COOKIE_NAME {
                 sqlx::query("DELETE FROM auth_tokens WHERE token_hash = $1 AND kind = 'session'")
                     .bind(crypto::hash_token(value))
                     .execute(&app.db)
                     .await?;
             }
-        }
     }
     Ok(([(SET_COOKIE, auth::clear_cookie())], Json(json!({ "ok": true }))).into_response())
 }

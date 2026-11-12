@@ -43,15 +43,12 @@ fn parse_request(head: &str) -> Result<ConnectRequest, &'static str> {
     let port: u16 = port.parse().map_err(|_| "malformed CONNECT port")?;
     let mut token = None;
     for line in lines {
-        if let Some((name, value)) = line.split_once(':') {
-            if name.eq_ignore_ascii_case("proxy-authorization") {
-                if let Some(encoded) = value.trim().strip_prefix("Basic ") {
-                    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded.trim()) {
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case("proxy-authorization")
+                && let Some(encoded) = value.trim().strip_prefix("Basic ")
+                    && let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded.trim()) {
                         token = String::from_utf8_lossy(&decoded).split_once(':').map(|(_, password)| password.to_string());
                     }
-                }
-            }
-        }
     }
     Ok(ConnectRequest { host: host.trim_matches(['[', ']']).to_string(), port, token })
 }
