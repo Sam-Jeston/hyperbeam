@@ -12,7 +12,7 @@ Today most agent work happens in someone’s terminal and stays invisible until 
 - **A shared board.** Workstreams move from scoping to building to review. Each shows the agents on it, what they are doing right now, and the pull requests they produced. See [The board and workstreams](/board).
 - **Any harness.** Claude Code, Codex, Gemini CLI, OpenCode, or anything else that speaks the [Agent Client Protocol](https://agentclientprotocol.com). Bring a team API key or your own credential. See [Harnesses and models](/harnesses).
 - **Permissions that belong to people.** An agent can do only what the person who started it may: GitHub and every connected service, per repository. See [People and permissions](/permissions).
-- **Agents never hold your credentials.** GitHub and connected services such as Linear, Notion, PostHog, Sentry or your own MCP servers are reached through Hyperbeam’s tool gateway and git proxy, which check every request and record it. See [Security model](/security).
+- **Agents never hold your credentials.** GitHub and connected services such as Linear, Notion, Slack, Datadog, Sentry or your own MCP servers are reached through Hyperbeam’s tool gateway and git proxy, which check every request and record it. See [Security model](/security).
 - **A conductor.** One agent that scopes a request, starts worker agents across repositories, and is told when each reports back. See [Conductors](/conductor).
 - **Skills, workflows and team notes.** What your team teaches its agents, kept in one place and shared by every session. See [Skills and team notes](/library) and [Workflows](/workflows).
 

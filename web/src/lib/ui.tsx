@@ -144,7 +144,10 @@ export const isSubmitKey = (e: React.KeyboardEvent) => e.key === "Enter" && (e.m
 
 // --------------------------------------------------------------- components
 
-const SYSTEM_NAMES: Record<string, string> = { github: "GitHub", gitlab: "GitLab", linear: "Linear", notion: "Notion", posthog: "PostHog", sentry: "Sentry" };
+const SYSTEM_NAMES: Record<string, string> = {
+  github: "GitHub", gitlab: "GitLab", linear: "Linear", notion: "Notion", posthog: "PostHog", sentry: "Sentry",
+  betterstack: "Better Stack", datadog: "Datadog", figma: "Figma", granola: "Granola", hubspot: "HubSpot", rootly: "Rootly", slack: "Slack",
+};
 /** How to write an integration's name: "GitHub", not "Github". */
 export const systemName = (system: string) => SYSTEM_NAMES[system] ?? system.charAt(0).toUpperCase() + system.slice(1);
 

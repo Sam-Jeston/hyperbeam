@@ -208,9 +208,22 @@ pub async fn create(State(app): State<App>, actor: AuthUser, Json(body): Json<Co
         return Err(ApiError::Conflict(format!("`{name}` is already connected")));
     }
     let custom_oauth = body.auth.as_ref().filter(|a| preset.is_none() && a.is_oauth());
-    if custom_oauth.is_some() || preset.and_then(presets::find).is_some_and(|p| p.oauth) {
+    let signs_in = preset.and_then(presets::find).filter(|p| p.oauth);
+    if custom_oauth.is_some() || signs_in.is_some() {
         // Nothing is saved until the admin comes back signed in.
-        let client = custom_oauth.map(AuthBody::client).transpose()?.flatten();
+        let client = match signs_in.filter(|p| p.oauth_client) {
+            // A vendor that registers no clients needs the admin's own.
+            Some(preset) => Some(
+                body.auth
+                    .as_ref()
+                    .map(AuthBody::client)
+                    .transpose()?
+                    .flatten()
+                    .filter(|c| c.secret.is_some())
+                    .ok_or_else(|| ApiError::bad(format!("{} needs the client ID and secret of an OAuth client you create with it", preset.title)))?,
+            ),
+            None => custom_oauth.map(AuthBody::client).transpose()?.flatten(),
+        };
         let scope = custom_oauth.and_then(|a| trimmed(&a.scope));
         let spec = Spec { name, preset: preset.map(str::to_string), title, url, headers, options };
         return sign_in(&app, spec, client, None, scope, &actor).await;
@@ -337,11 +350,12 @@ pub async fn update(State(app): State<App>, actor: AuthUser, Path(name): Path<St
     // A credential for one server is not to be sent to another.
     let moved = url::Url::parse(&url).ok().map(|u| u.origin()) != url::Url::parse(&current.url).ok().map(|u| u.origin());
     let signed_in = current.auth.oauth.as_ref();
-    let asked = body.auth.as_ref().filter(|a| current.preset.is_none() && a.is_oauth());
+    // A preset's sign-in is its own, except for the client an admin made for it.
+    let asked = body.auth.as_ref().filter(|a| a.is_oauth() && current.preset().is_none_or(|p| p.oauth_client));
     if asked.is_some() || signed_in.is_some() && (body.auth.is_none() || current.preset.is_some()) {
         let supplied = signed_in.filter(|o| !o.registered).map(|o| o.client_id.clone());
         let client = asked.map(AuthBody::client).transpose()?.flatten();
-        let scope = asked.and_then(|a| trimmed(&a.scope));
+        let scope = asked.filter(|_| current.preset.is_none()).and_then(|a| trimmed(&a.scope));
         let again = match (signed_in, asked) {
             (None, _) => true,
             (Some(_), _) if moved => true,

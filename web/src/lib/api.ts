@@ -191,6 +191,9 @@ export interface Preset {
   secret_help: string;
   /** key: an admin pastes a credential; oauth: an admin signs in with the vendor. */
   auth: "key" | "oauth";
+  /** The admin creates an OAuth client with the vendor and enters its ID and secret. */
+  oauth_client: boolean;
+  oauth_client_help: string;
   options: PresetOption[];
   /** vendor: sorted by the vendor's read-only server; name: by tool name. */
   classified_by: "vendor" | "name";

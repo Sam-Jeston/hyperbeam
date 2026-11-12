@@ -330,7 +330,8 @@ async fn token_request(http: &reqwest::Client, label: &str, oauth: &OAuth, clien
         bail!("{label} would not issue a token ({status}{})", problem(&body));
     }
     let access = body.get("access_token").and_then(Value::as_str).filter(|t| !t.is_empty()).ok_or_else(|| anyhow!("{label} answered without an access token"))?;
-    if body.get("token_type").and_then(Value::as_str).is_some_and(|t| !t.eq_ignore_ascii_case("bearer")) {
+    // Slack calls the bearer token it issues for a person a `user` token.
+    if body.get("token_type").and_then(Value::as_str).is_some_and(|t| !t.eq_ignore_ascii_case("bearer") && t != "user") {
         bail!("{label} issued a token Hyperbeam cannot use (type `{}`)", body["token_type"].as_str().unwrap_or_default());
     }
     if access.contains(['\r', '\n']) {

@@ -1,4 +1,4 @@
-// MCP connections: first-class services (Linear, Notion, PostHog, Sentry) and any
+// MCP connections: first-class services (Linear, Notion, Slack and the like) and any
 // other MCP server a team wants its agents to reach, through the gateway.
 
 import { Plus, RefreshCw, Search, ShieldCheck, Wrench } from "lucide-react";
@@ -11,6 +11,7 @@ import { Field, Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Badge, Card, EmptyState, Notice, Skeleton } from "../components/ui/surface";
 import { api, type Connection, type ConnectionTool, type Preset, type ToolLevel } from "../lib/api";
+import { LOGOS } from "../lib/logos";
 import { reloadGrants } from "../lib/store";
 import { ErrorNote, SectionTitle, Time, useAction, useLoad } from "../lib/ui";
 import { cn } from "../lib/utils";
@@ -68,6 +69,7 @@ export function Connections({ isAdmin }: { isAdmin: boolean }) {
           return (
             <ConnectionCard
               key={preset.id}
+              logo={preset.id}
               title={preset.title}
               blurb={preset.blurb}
               connection={connection}
@@ -113,7 +115,28 @@ export function Connections({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
+/** A service's brand mark on a white tile, or its initial when it has none. */
+function ServiceLogo({ id, title }: { id?: string; title: string }) {
+  const logo = id ? LOGOS[id] : undefined;
+  if (!logo) {
+    return <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-surface-2 font-display text-[17px] font-bold text-foreground">{title.charAt(0).toUpperCase()}</div>;
+  }
+  return (
+    <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-white" aria-hidden>
+      {"image" in logo ? (
+        <img src={logo.image} alt="" className="size-full object-cover" />
+      ) : (
+        <svg viewBox={logo.viewBox} className="size-[22px]">
+          {logo.paths.map(([d, fill]) => <path key={fill} d={d} fill={fill} fillRule={logo.evenodd ? "evenodd" : undefined} clipRule={logo.evenodd ? "evenodd" : undefined} />)}
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function ConnectionCard(props: {
+  /** The preset whose brand mark to show. */
+  logo?: string;
   title: string;
   blurb: ReactNode;
   connection: Connection | null;
@@ -126,7 +149,7 @@ function ConnectionCard(props: {
   return (
     <Card className="grid gap-3 p-4">
       <div className="flex flex-wrap items-start gap-4">
-        <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-surface-2 font-display text-[17px] font-bold text-foreground">{props.title.charAt(0).toUpperCase()}</div>
+        <ServiceLogo id={props.logo} title={props.title} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-display text-[15.5px] font-semibold">{props.title}</h3>
@@ -186,12 +209,18 @@ function ConnectionDialog(props: { preset: Preset | null; connection: Connection
   const oauth = preset ? preset.auth === "oauth" : auth === "oauth";
   const signedIn = Boolean(connection?.auth.oauth);
   const needsSecret = !oauth && (preset ? true : auth !== "none");
-  const ready = connection ? true : (preset || (name.trim() && url.trim())) && (!needsSecret || secret.trim());
+  const needsClient = Boolean(preset?.oauth_client);
+  const ready = connection ? true : (preset || (name.trim() && url.trim())) && (!needsSecret || secret.trim()) && (!needsClient || (clientId.trim() && clientSecret));
 
   const save = () =>
     action.run(async () => {
       const body = preset
-        ? { preset: preset.id, options, secret: secret || undefined }
+        ? {
+            preset: preset.id,
+            options,
+            secret: secret || undefined,
+            auth: needsClient ? { kind: "oauth", client_id: clientId.trim() || undefined, client_secret: clientSecret || undefined } : undefined,
+          }
         : {
             name: name.trim(),
             title: title.trim() || undefined,
@@ -246,6 +275,17 @@ function ConnectionDialog(props: { preset: Preset | null; connection: Connection
               }
             </Field>
           ))}
+          {needsClient && (
+            <>
+              <p className="text-[13px] text-muted">
+                {preset.oauth_client_help} Redirect URL: <code className="font-mono text-[12.5px] break-all">{props.redirectUri}</code>
+              </p>
+              <Field label="Client ID">{(id) => <Input id={id} mono autoComplete="off" value={clientId} onChange={(e) => setClientId(e.target.value)} />}</Field>
+              <Field label="Client secret" hint={signedIn ? "Leave blank to keep the current one. Stored encrypted and never shown again." : "Stored encrypted and never shown again."}>
+                {(id) => <Input id={id} type="password" mono autoComplete="off" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={signedIn ? "••••••••••••" : undefined} />}
+              </Field>
+            </>
+          )}
           <Notice tone="info">
             {preset.classified_by === "vendor"
               ? `Hyperbeam sorts ${preset.title}’s tools into read and write using ${preset.title}’s own read-only server, and sends read calls through it.`

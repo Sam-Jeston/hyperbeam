@@ -35,6 +35,11 @@ pub struct Preset {
     /// The credential is a token from an OAuth sign-in rather than a key an
     /// admin pastes.
     pub oauth: bool,
+    /// The vendor does not let clients register themselves: an admin creates
+    /// an OAuth client with it and enters the client's ID and secret.
+    pub oauth_client: bool,
+    /// Where an admin creates that client, shown beside the redirect URL.
+    pub oauth_client_help: &'static str,
     /// A prefix the vendor puts on every tool name, which agents do not see.
     pub tool_prefix: &'static str,
     /// Headers always sent.
@@ -55,6 +60,23 @@ fn opt<'a>(options: &'a Value, key: &str) -> Option<&'a str> {
     options.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
 }
 
+fn csv(raw: &str) -> String {
+    let list: Vec<String> = raw.split(',').map(|f| f.trim().to_lowercase()).filter(|f| !f.is_empty()).collect();
+    url::form_urlencoded::byte_serialize(list.join(",").as_bytes()).collect()
+}
+
+/// A comma-separated list an admin typed, tidied for a query string.
+/// Datadog serves each site from its own host.
+const DATADOG_SITES: &[(&str, &str, &str)] = &[
+    ("us1", "US1 (datadoghq.com)", "mcp.datadoghq.com"),
+    ("us3", "US3 (us3.datadoghq.com)", "mcp.us3.datadoghq.com"),
+    ("us5", "US5 (us5.datadoghq.com)", "mcp.us5.datadoghq.com"),
+    ("eu1", "EU1 (datadoghq.eu)", "mcp.datadoghq.eu"),
+    ("ap1", "AP1 (ap1.datadoghq.com)", "mcp.ap1.datadoghq.com"),
+    ("ap2", "AP2 (ap2.datadoghq.com)", "mcp.ap2.datadoghq.com"),
+    ("uk1", "UK1 (uk1.datadoghq.com)", "mcp.uk1.datadoghq.com"),
+];
+
 pub const PRESETS: &[Preset] = &[
     Preset {
         id: "linear",
@@ -66,6 +88,8 @@ pub const PRESETS: &[Preset] = &[
         auth_header: "Authorization",
         auth_prefix: "Bearer ",
         oauth: false,
+        oauth_client: false,
+        oauth_client_help: "",
         tool_prefix: "",
         headers: &[],
         read_label: "Read issues, projects and comments",
@@ -85,6 +109,8 @@ pub const PRESETS: &[Preset] = &[
         auth_header: "Authorization",
         auth_prefix: "Bearer ",
         oauth: false,
+        oauth_client: false,
+        oauth_client_help: "",
         tool_prefix: "",
         // One tool per operation rather than a single catch-all `exec` tool,
         // so each can be classified and granted on its own.
@@ -103,10 +129,7 @@ pub const PRESETS: &[Preset] = &[
         url: |options| {
             let host = if opt(options, "region") == Some("eu") { "mcp-eu.posthog.com" } else { "mcp.posthog.com" };
             match opt(options, "features") {
-                Some(features) => {
-                    let list: Vec<String> = features.split(',').map(|f| f.trim().to_lowercase()).filter(|f| !f.is_empty()).collect();
-                    format!("https://{host}/mcp?features={}", url::form_urlencoded::byte_serialize(list.join(",").as_bytes()).collect::<String>())
-                }
+                Some(features) => format!("https://{host}/mcp?features={}", csv(features)),
                 None => format!("https://{host}/mcp"),
             }
         },
@@ -123,6 +146,8 @@ pub const PRESETS: &[Preset] = &[
         // Sentry reserves `Bearer` for its own OAuth tokens.
         auth_prefix: "Sentry-Bearer ",
         oauth: false,
+        oauth_client: false,
+        oauth_client_help: "",
         tool_prefix: "",
         headers: &[],
         read_label: "Search and read issues, events, traces and releases",
@@ -151,6 +176,8 @@ pub const PRESETS: &[Preset] = &[
         auth_header: "Authorization",
         auth_prefix: "Bearer ",
         oauth: true,
+        oauth_client: false,
+        oauth_client_help: "",
         // Every tool is `notion-…`; agents see `notion_search`, not `notion_notion-search`.
         tool_prefix: "notion-",
         headers: &[],
@@ -180,6 +207,8 @@ pub const PRESETS: &[Preset] = &[
         auth_header: "Authorization",
         auth_prefix: "Bearer ",
         oauth: false,
+        oauth_client: false,
+        oauth_client_help: "",
         tool_prefix: "",
         headers: &[],
         read_label: "Search the web",
@@ -191,6 +220,218 @@ pub const PRESETS: &[Preset] = &[
         search: true,
         options: || json!([]),
         url: |_| "https://mcp.exa.ai/mcp".into(),
+    },
+    Preset {
+        id: "betterstack",
+        title: "Better Stack",
+        blurb: "Lets agents query logs, metrics and errors, and read and manage incidents, on-call, monitors, status pages and dashboards.",
+        secret_label: "API token",
+        secret_help: "A Better Stack API token (Better Stack: Settings → API tokens). Agents act with this token’s access. \
+                      A token without “Read & write” access limits every agent to reading, whatever their grants.",
+        auth_header: "Authorization",
+        auth_prefix: "Bearer ",
+        oauth: false,
+        oauth_client: false,
+        oauth_client_help: "",
+        tool_prefix: "",
+        headers: &[],
+        read_label: "Query telemetry; read incidents, on-call, monitors, status pages and dashboards",
+        write_label: "Create and change incidents, monitors, status pages, dashboards and more",
+        // Better Stack documents its tools by what they do rather than by
+        // name, so these follow its verbs. A tool they miss waits for an admin.
+        classify: Classify::Prefixes {
+            read: &["list_", "get_", "search_", "render_", "plan_", "export_"],
+            write: &[
+                "create_", "update_", "remove_", "delete_", "add_", "edit_", "configure_", "set_", "import_", "move_", "upsert_",
+                "acknowledge_", "escalate_", "resolve_", "reopen_", "invite_", "change_", "link_", "unlink_", "pause_", "resume_",
+            ],
+        },
+        search: false,
+        options: || json!([]),
+        url: |_| "https://mcp.betterstack.com".into(),
+    },
+    Preset {
+        id: "datadog",
+        title: "Datadog",
+        blurb: "Lets agents search logs, metrics, traces, monitors, incidents and dashboards, and act on them.",
+        secret_label: "",
+        secret_help: "You will be sent to Datadog to sign in. Agents act as the account you sign in with, within its roles: \
+                      reading needs the MCP Read permission, and changing things needs MCP Write and your organization’s “MCP Write Access” setting. \
+                      Consider a dedicated account. GovCloud sites are not supported by Datadog’s MCP server.",
+        auth_header: "Authorization",
+        auth_prefix: "Bearer ",
+        oauth: true,
+        oauth_client: false,
+        oauth_client_help: "",
+        tool_prefix: "",
+        headers: &[],
+        read_label: "Search and read logs, metrics, traces, monitors, incidents and dashboards",
+        write_label: "Create and change notebooks, monitors, dashboards, cases and more",
+        classify: Classify::Prefixes {
+            read: &[
+                "search_", "get_", "list_", "aggregate_", "analyze_", "analyse_", "validate_", "find_", "describe_", "read_", "explore_",
+                "estimate_", "build_", "check_", "summarize_", "rank_", "suggest_", "verify_", "forecast_", "diagnose_", "discover_",
+                "optimize_", "apm_get_", "apm_search_", "apm_investigate_", "apm_latency_", "apm_discover_", "apm_query_",
+                "ddsql_get_", "ddsql_schema_", "ddsql_search_", "ddsql_read_", "ddsql_run_query", "cost_recommendations",
+                "run_product_analytics_", "run_network_path",
+            ],
+            write: &[
+                "create_", "update_", "delete_", "edit_", "upsert_", "append_", "replace_", "recover_", "clone_", "add_", "remove_",
+                "execute_", "trigger_", "steer_", "manage_", "move_", "publish_", "unpublish_", "cancel_", "start_", "conclude_",
+                "link_", "unlink_", "attach_", "detach_", "sync_", "mitigate_", "enable_", "disable_", "reorder_", "send_", "mute_",
+                "assign_", "override_", "unblock_", "ddsql_upsert_", "ddsql_create_", "run_datadog_bits_agent",
+                // Runs shell commands on hosts, whatever Datadog calls it.
+                "datadog_remote_action_", "synthetics_test_wizard",
+            ],
+        },
+        search: false,
+        options: || {
+            let sites: Vec<Value> = DATADOG_SITES.iter().map(|(value, label, _)| json!({ "value": value, "label": label })).collect();
+            json!([
+                { "key": "site", "label": "Datadog site", "choices": sites, "default": "us1" },
+                { "key": "toolsets", "label": "Toolsets", "placeholder": "core, apm, error-tracking",
+                  "hint": "Optional, comma-separated. Datadog offers only its core tools unless you name more, or “all”." },
+            ])
+        },
+        url: |options| {
+            let site = opt(options, "site").unwrap_or("us1");
+            let host = DATADOG_SITES.iter().find(|(id, ..)| *id == site).map_or(DATADOG_SITES[0].2, |(.., host)| host);
+            match opt(options, "toolsets") {
+                Some(toolsets) => format!("https://{host}/v1/mcp?toolsets={}", csv(toolsets)),
+                None => format!("https://{host}/v1/mcp"),
+            }
+        },
+    },
+    Preset {
+        id: "figma",
+        title: "Figma",
+        blurb: "Lets agents read designs, variables and screenshots from Figma files, and create and edit content in them.",
+        secret_label: "",
+        secret_help: "You will be sent to Figma to sign in. Agents act as the account you sign in with, and reach the files it can. \
+                      Figma only admits MCP clients in its MCP catalog, so the sign-in is refused until Figma has approved Hyperbeam for your installation.",
+        auth_header: "Authorization",
+        auth_prefix: "Bearer ",
+        oauth: true,
+        oauth_client: false,
+        oauth_client_help: "",
+        tool_prefix: "",
+        headers: &[],
+        read_label: "Read designs, variables, screenshots and libraries",
+        write_label: "Create and edit files, designs, diagrams and Code Connect mappings",
+        classify: Classify::Prefixes {
+            read: &["get_", "list_", "search_", "download_", "whoami", "weave_list_", "weave_get_", "weave_find_"],
+            write: &[
+                "add_", "create_", "generate_", "html_to_figma", "send_", "update_", "upload_", "use_figma",
+                "weave_upload_", "weave_run_", "weave_cancel_",
+            ],
+        },
+        search: false,
+        options: || json!([]),
+        url: |_| "https://mcp.figma.com/mcp".into(),
+    },
+    Preset {
+        id: "granola",
+        title: "Granola",
+        blurb: "Lets agents search and read meeting notes and transcripts, and organise notes into folders.",
+        secret_label: "",
+        secret_help: "You will be sent to Granola to sign in. Agents act as the account you sign in with, and reach the notes it can: \
+                      every agent sees that person’s meetings. Transcripts and editing need a paid Granola plan.",
+        auth_header: "Authorization",
+        auth_prefix: "Bearer ",
+        oauth: true,
+        oauth_client: false,
+        oauth_client_help: "",
+        tool_prefix: "",
+        headers: &[],
+        read_label: "Search and read meeting notes, transcripts and folders",
+        write_label: "Edit private notes, regenerate summaries and organise folders",
+        classify: Classify::Prefixes {
+            read: &["search_", "list_", "get_", "query_"],
+            // Switching workspace or signing out changes the account for every agent.
+            write: &["create_", "update_", "add_", "remove_", "generate_", "switch_", "sign_out"],
+        },
+        search: false,
+        options: || json!([]),
+        url: |_| "https://mcp.granola.ai/mcp".into(),
+    },
+    Preset {
+        id: "hubspot",
+        title: "HubSpot",
+        blurb: "Lets agents search and read CRM records, campaigns, conversations and content, and create and update them.",
+        secret_label: "",
+        secret_help: "You will be sent to HubSpot to sign in and choose an account. Agents act as the user you sign in with, within that user’s permissions.",
+        auth_header: "Authorization",
+        auth_prefix: "Bearer ",
+        oauth: true,
+        oauth_client: true,
+        oauth_client_help: "In HubSpot, go to Development → MCP Connectors → Create MCP connector, and give it the redirect URL below. \
+                            Its details page shows the client ID and secret.",
+        tool_prefix: "",
+        headers: &[],
+        read_label: "Search and read CRM records, properties, campaigns, conversations and analytics",
+        write_label: "Create and update CRM records, properties, campaigns, emails, pages and posts",
+        classify: Classify::Prefixes {
+            read: &["get_", "search_", "read_", "query_", "discover_", "render_", "tool_guidance"],
+            write: &["manage_", "submit_", "create_", "update_", "delete_"],
+        },
+        search: false,
+        options: || json!([]),
+        url: |_| "https://mcp.hubspot.com".into(),
+    },
+    Preset {
+        id: "rootly",
+        title: "Rootly",
+        blurb: "Lets agents find and read incidents, alerts and on-call schedules, and create and update them.",
+        secret_label: "API key",
+        secret_help: "A Rootly API key (Rootly: Account → Manage API keys → Generate New API Key). A global key sees every team; \
+                      a team or personal key limits agents to what that team or person can reach.",
+        auth_header: "Authorization",
+        auth_prefix: "Bearer ",
+        oauth: false,
+        oauth_client: false,
+        oauth_client_help: "",
+        tool_prefix: "",
+        headers: &[],
+        read_label: "Find and read incidents, alerts, on-call schedules and services",
+        write_label: "Create and update incidents, action items, schedules and more",
+        classify: Classify::ReadOnlyVariant(Variant::Header("X-MCP-Readonly", "true")),
+        search: false,
+        options: || {
+            json!([{ "key": "toolsets", "label": "Toolsets", "placeholder": "core, incidents, oncall",
+                     "hint": "Optional, comma-separated. Rootly offers about 280 tools with “all”; naming a few keeps agents focused." }])
+        },
+        url: |options| match opt(options, "toolsets") {
+            Some(toolsets) => format!("https://mcp.rootly.com/mcp?toolsets={}", csv(toolsets)),
+            None => "https://mcp.rootly.com/mcp".into(),
+        },
+    },
+    Preset {
+        id: "slack",
+        title: "Slack",
+        blurb: "Lets agents search and read messages, channels, files and canvases, and send messages and create canvases.",
+        secret_label: "",
+        secret_help: "You will be sent to Slack to sign in. Agents act as the person who signs in: they read what that person can, \
+                      and what they send is sent in that person’s name. Consider a dedicated account.",
+        auth_header: "Authorization",
+        auth_prefix: "Bearer ",
+        oauth: true,
+        oauth_client: true,
+        oauth_client_help: "Create a Slack app for your workspace at api.slack.com/apps (Slack admits only internal or Marketplace apps). \
+                            Under Agents, turn on the Slack MCP server; under OAuth & Permissions, add the redirect URL below and the user scopes agents should have. \
+                            Basic Information shows the client ID and secret.",
+        // Every tool is `slack_…`; agents see `slack_send_message`, not `slack_slack_send_message`.
+        tool_prefix: "slack_",
+        headers: &[],
+        read_label: "Search and read messages, channels, files, canvases and profiles",
+        write_label: "Send and schedule messages, react, upload files, and create channels, canvases and lists",
+        classify: Classify::Prefixes {
+            read: &["search_", "read_", "list_", "get_"],
+            // The first step of an upload, despite its name.
+            write: &["get_file_upload", "send_", "schedule_", "create_", "update_", "add_", "remove_", "delete_", "upload_", "complete_", "invite_", "join_"],
+        },
+        search: false,
+        options: || json!([]),
+        url: |_| "https://mcp.slack.com/mcp".into(),
     },
 ];
 
@@ -245,6 +486,8 @@ impl Preset {
             "secret_label": self.secret_label,
             "secret_help": self.secret_help,
             "auth": if self.oauth { "oauth" } else { "key" },
+            "oauth_client": self.oauth_client,
+            "oauth_client_help": self.oauth_client_help,
             "options": (self.options)(),
             "classified_by": match self.classify {
                 Classify::ReadOnlyVariant(_) => "vendor",
@@ -298,6 +541,82 @@ mod tests {
         assert_eq!(exa.by_prefix("web_search_exa", &json!({ "readOnlyHint": true })), Some(ToolLevel::Read));
         assert_eq!(exa.by_prefix("web_fetch_exa", &json!({ "readOnlyHint": true })), None);
         assert!(PRESETS.iter().filter(|p| p.search).all(|p| p.id == "exa"));
+    }
+
+    #[test]
+    fn every_preset_is_usable() {
+        for preset in PRESETS {
+            assert!(url::Url::parse(&(preset.url)(&json!({}))).is_ok_and(|u| u.scheme() == "https"), "{}", preset.id);
+            assert!(preset.id.chars().all(|c| c.is_ascii_lowercase()), "{}", preset.id);
+            assert_eq!(PRESETS.iter().filter(|p| p.id == preset.id).count(), 1, "{}", preset.id);
+            // A pasted key needs a name; a sign-in has none to paste.
+            assert_eq!(preset.oauth, preset.secret_label.is_empty(), "{}", preset.id);
+            assert!(!preset.oauth_client || preset.oauth, "{}", preset.id);
+            assert_eq!(preset.oauth_client, !preset.oauth_client_help.is_empty(), "{}", preset.id);
+        }
+    }
+
+    #[test]
+    fn new_urls_follow_options() {
+        let datadog = find("datadog").unwrap();
+        assert_eq!((datadog.url)(&json!({})), "https://mcp.datadoghq.com/v1/mcp");
+        assert_eq!((datadog.url)(&json!({ "site": "eu1", "toolsets": "Core, apm ," })), "https://mcp.datadoghq.eu/v1/mcp?toolsets=core%2Capm");
+        assert_eq!((datadog.url)(&json!({ "site": "elsewhere" })), "https://mcp.datadoghq.com/v1/mcp");
+        let rootly = find("rootly").unwrap();
+        assert_eq!((rootly.url)(&json!({ "toolsets": "core,incidents" })), "https://mcp.rootly.com/mcp?toolsets=core%2Cincidents");
+        let read_only = rootly.read_only(&endpoint("https://mcp.rootly.com/mcp?toolsets=core")).unwrap();
+        assert_eq!(read_only.url, "https://mcp.rootly.com/mcp?toolsets=core");
+        assert!(read_only.headers.contains(&("X-MCP-Readonly".into(), "true".into())));
+    }
+
+    #[test]
+    fn documented_tools_sort_as_the_vendors_describe_them() {
+        let cases: &[(&str, &[&str], &[&str], &[&str])] = &[
+            (
+                "datadog",
+                &["search_datadog_logs", "get_datadog_metric", "aggregate_spans", "analyze_datadog_logs", "apm_get_service_health", "ddsql_run_query", "run_product_analytics_journey"],
+                &["create_datadog_notebook", "edit_datadog_notebook", "upsert_datadog_dashboard", "execute_code", "execute_datadog_workflow", "ddsql_upsert_saved_query", "run_datadog_bits_agent", "datadog_remote_action_restricted_shell_run_command", "trigger_bits_ai_investigation"],
+                &["swap_widget_type", "kubernetes-ops-center-api-server-client-load"],
+            ),
+            (
+                "figma",
+                &["get_design_context", "get_screenshot", "get_variable_defs", "list_shaders", "search_design_system", "download_assets", "whoami", "weave_list_tools"],
+                &["use_figma", "generate_figma_design", "create_new_file", "html_to_figma", "send_code_to_figma", "upload_assets", "add_code_connect_map", "weave_run_model"],
+                &[],
+            ),
+            (
+                "granola",
+                &["search_meetings", "list_meetings", "get_meeting_transcript", "query_granola_meetings", "get_account_info"],
+                &["create_folder", "update_private_notes", "add_note_to_folder", "remove_note_from_folder", "generate_summary", "switch_workspace", "sign_out"],
+                &[],
+            ),
+            (
+                "hubspot",
+                &["get_user_details", "search_crm_objects", "query_crm_data", "read_campaign_data", "discover_hubspot_schema", "render_asset", "tool_guidance"],
+                &["manage_crm_objects", "manage_segment", "manage_blog_post", "manage_onboarding", "submit_feedback"],
+                &[],
+            ),
+            (
+                "slack",
+                &["slack_search_public", "slack_read_channel", "slack_read_user_profile"],
+                &["slack_send_message", "slack_schedule_message", "slack_create_canvas", "slack_get_file_upload_url", "slack_complete_file_upload"],
+                &["slack_something_new"],
+            ),
+            ("betterstack", &["list_monitors", "get_incident_details"], &["remove_dashboard", "remove_chart", "create_incident", "acknowledge_incident"], &["monitors"]),
+        ];
+        for (id, read, write, unsorted) in cases {
+            let preset = find(id).unwrap();
+            for tool in *read {
+                assert_eq!(preset.by_prefix(tool, &json!({})), Some(ToolLevel::Read), "{id} {tool}");
+            }
+            for tool in *write {
+                assert_eq!(preset.by_prefix(tool, &json!({ "readOnlyHint": true })), Some(ToolLevel::Write), "{id} {tool}");
+            }
+            for tool in *unsorted {
+                assert_eq!(preset.by_prefix(tool, &json!({})), None, "{id} {tool}");
+            }
+        }
+        assert_eq!(find("slack").unwrap().short_name("slack_send_message"), "send_message");
     }
 
     #[test]

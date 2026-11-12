@@ -14,7 +14,7 @@ its own sandbox, and everyone can watch the scoping and the building as it happe
   [Agent Client Protocol](https://agentclientprotocol.com). Bring a team API key or your own credential.
 - **Permissions that belong to people.** An agent can do only what the person who started it may:
   GitHub or GitLab (read, write, open PR, merge PR) and each connected MCP service (read, write), per repository.
-- **Agents never hold your credentials.** GitHub, GitLab and connected MCP services (Linear, Notion, PostHog, Sentry, or your own) are reached through Hyperbeam's tool
+- **Agents never hold your credentials.** GitHub, GitLab and connected MCP services (Linear, Notion, Slack, Datadog, Sentry and more, or your own) are reached through Hyperbeam's tool
   gateway and git proxy, which check every request and record it.
 - **A conductor.** One agent that scopes a request, starts worker agents across repositories, and is
   told when each reports back.
@@ -160,7 +160,7 @@ resumed with a message, in a fresh sandbox, from the branch it pushed.
 3. **Give a harness a credential** (*Settings → Harnesses*): a team API key, or each person's own.
 4. **Invite people** (*People & permissions*) and tick what each person's agents may do.
    Hyperbeam sends no email; you pass the invite link on.
-5. Optionally connect services such as Linear, Notion, PostHog and Sentry, or your own MCP servers, and add skills and workflows in the *Library*.
+5. Optionally connect services such as Linear, Notion, Slack, Datadog and Sentry, or your own MCP servers, and add skills and workflows in the *Library*.
 
 ### Permissions
 
