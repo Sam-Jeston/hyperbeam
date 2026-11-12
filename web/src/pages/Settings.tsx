@@ -499,15 +499,34 @@ function HarnessDialog({ harness, onClose }: { harness: Harness | null; onClose:
 function General() {
   const { data, error, reload } = useLoad<any>(() => api.get("/settings"), []);
   const harnesses = useLoad<{ harnesses: Harness[] }>(() => api.get("/harnesses"), []);
-  const [form, setForm] = useState<{ team_name: string; default_harness: string; egress: string } | null>(null);
+  const [form, setForm] = useState<{ team_name: string; default_harness: string; egress: string; web_mode: string; web_domains: string } | null>(null);
   const action = useAction();
-  if (data && !form) setForm({ team_name: data.team_name ?? "", default_harness: data.default_harness, egress: (data.egress_allow as string[]).join("\n") });
+  if (data && !form) {
+    setForm({
+      team_name: data.team_name ?? "",
+      default_harness: data.default_harness,
+      egress: (data.egress_allow as string[]).join("\n"),
+      web_mode: data.web_access.mode,
+      web_domains: (data.web_access.domains as string[]).join("\n"),
+    });
+  }
   if (error) return <ErrorNote error={error} />;
   if (!data || !form) return <div className="grid max-w-[600px] gap-4"><Skeleton className="h-14" /><Skeleton className="h-14" /><Skeleton className="h-28" /></div>;
-  const dirty = form.team_name !== (data.team_name ?? "") || form.default_harness !== data.default_harness || form.egress !== (data.egress_allow as string[]).join("\n");
+  const dirty =
+    form.team_name !== (data.team_name ?? "") ||
+    form.default_harness !== data.default_harness ||
+    form.egress !== (data.egress_allow as string[]).join("\n") ||
+    form.web_mode !== data.web_access.mode ||
+    form.web_domains !== (data.web_access.domains as string[]).join("\n");
+  const lines = (text: string) => text.split("\n").map((l) => l.trim()).filter(Boolean);
   const save = () =>
     action.run(async () => {
-      await api.put("/settings", { team_name: form.team_name, default_harness: form.default_harness, egress_allow: form.egress.split("\n").map((l) => l.trim()).filter(Boolean) });
+      await api.put("/settings", {
+        team_name: form.team_name,
+        default_harness: form.default_harness,
+        egress_allow: lines(form.egress),
+        web_access: { mode: form.web_mode, domains: lines(form.web_domains) },
+      });
       reload();
       setForm(null);
     }, { success: "Settings saved" });
@@ -527,6 +546,34 @@ function General() {
       </Field>
       {!data.egress_enforced && (
         <Notice tone="warning" title="Network access is not restricted">The egress proxy is not enabled on this installation, so Hyperbeam does not limit where sandboxes connect. This list takes effect once it is.</Notice>
+      )}
+      <Field
+        label="Web pages agents may read"
+        hint="Agents read the web through Hyperbeam’s web_fetch tool, not from their sandbox, and only if the person who started them holds “Read public web pages”. Every fetch is recorded."
+      >
+        {(id) => (
+          <Select
+            id={id}
+            value={form.web_mode}
+            onValueChange={(v) => setForm({ ...form, web_mode: v })}
+            options={[
+              { value: "known", label: "Pages they were given or found, and the sites listed below" },
+              { value: "listed", label: "Only the sites listed below" },
+              { value: "off", label: "None" },
+            ]}
+          />
+        )}
+      </Field>
+      {form.web_mode !== "off" && (
+        <Field
+          label="Sites agents may read freely"
+          optional={form.web_mode === "known"}
+          hint={form.web_mode === "known"
+            ? "One per line. Elsewhere, agents can fetch only URLs a person gave them, a web search returned, or a fetched page links to, so they cannot send data out in a URL they wrote. On these sites they can fetch any URL."
+            : "One per line. Agents can fetch any URL on these sites and nothing else."}
+        >
+          {(id) => <Textarea id={id} mono rows={3} value={form.web_domains} onChange={(e) => setForm({ ...form, web_domains: e.target.value })} placeholder={"docs.rs\n*.readthedocs.io"} />}
+        </Field>
       )}
       <ErrorNote error={action.error} />
       <div className="flex items-center gap-3">

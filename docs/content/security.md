@@ -17,6 +17,7 @@ The sandbox also receives the [harness credential](/credentials#what-the-agent-c
 |---|---|---|
 | `/git/…` | `git clone`, `fetch`, `push` | The repository is one of the session’s. `github:read` to fetch, `github:write` to push, `github:merge_pr` to push to the default branch. |
 | `/mcp` | Tools for GitHub, connected MCP servers and the platform | The grant each tool needs, and the repository. For a connection, that an admin has cleared the tool. |
+| `/mcp` `web_fetch` | Reading public web pages | The session holds `web:read`, the URL is one the agent may fetch, and the address is on the public internet. See [Web access](#web-access). |
 | Egress proxy | Everything else on the network | The host is on the allowlist. |
 
 GitHub and connection credentials, including the tokens from an OAuth sign-in, stay in the control plane. The git proxy and tool gateway add them to requests they have checked; the agent never sees them. Connected MCP servers are called by the control plane, not the sandbox, so they need no place on the egress allowlist.
@@ -32,6 +33,29 @@ Grants are evaluated against what the session’s owner holds **now**, not only 
 On Kubernetes, a NetworkPolicy lets sandboxes reach only the control plane and cluster DNS. With the egress proxy enabled, everything else goes through an allowlist: package registries by default, plus hosts admins add under **Settings → General**, plus each harness profile’s own hosts. Requests to other hosts are refused and recorded.
 
 The NetworkPolicy relies on a CNI that enforces it. See [Network isolation](/install-kubernetes#network-isolation).
+
+## Web access
+
+A sandbox cannot browse the web: the egress allowlist covers package registries and the model provider, nothing more. Agents read pages through the gateway’s `web_fetch` tool instead. The control plane fetches the page and returns it as markdown, so each request is checked, recorded in the audit log and shown in the session.
+
+A sandbox holds your source code, and a page an agent reads can try to instruct it. An agent that could fetch any URL could be talked into putting what it holds into one. So by default an agent can fetch only URLs it did not write itself:
+
+- URLs a person wrote: in a message to the agent, the workstream’s brief, or a skill it was given.
+- URLs a web search returned, when the search runs through a [web search connection](/integrations#web-search).
+- Links on pages it has already fetched.
+- Any page on a site an admin has listed under **Settings → General**.
+
+A conductor and its workers share what they may fetch. A URL a conductor writes to a worker does not count.
+
+Admins choose between this, **only the listed sites**, and **none**. An agent needs the `web:read` grant in every case.
+
+`web_fetch` makes `GET` requests only, sends no credentials, and refuses URLs that carry a username or password. It refuses any address that is not on the public internet (loopback, private networks, link-local and cloud metadata addresses), checks every redirect the same way, and pins each request to the address it checked. It reads at most 2 MB of a text response, and a session can fetch 30 pages a minute.
+
+What this does not stop:
+
+- **Listed sites.** On a site you list, an agent can fetch any URL, including one it wrote. List sites you would trust with a query string.
+- **Slow leaks.** Which of a page’s links an agent chooses to follow is visible to that site. The rate limit and the audit log bound this; they do not remove it.
+- **The harness’s own search.** Claude Code, Codex and Gemini CLI run their built-in web search on the model provider’s side. Hyperbeam does not see those searches, and URLs they return are not ones `web_fetch` will follow. Use a web search connection for that.
 
 ## The sandbox itself
 

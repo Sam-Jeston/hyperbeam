@@ -7,6 +7,7 @@
 
 mod github;
 mod platform;
+pub mod web;
 
 use crate::app::App;
 use crate::auth::bearer;
@@ -114,19 +115,24 @@ pub fn arg_list(args: &Value, name: &str) -> Vec<String> {
 fn catalog() -> Vec<ToolDef> {
     let mut tools = platform::tools();
     tools.extend(github::tools());
+    tools.extend(web::tools());
     tools
 }
 
 /// Tools this session can see: it holds the grant, and the system is
 /// connected. Connections contribute the tools cleared for use.
 async fn visible_tools(app: &App, session: &Session) -> Vec<Value> {
-    let connected: Vec<String> = sqlx::query_as::<_, (String,)>("SELECT kind FROM integrations")
+    let mut connected: Vec<String> = sqlx::query_as::<_, (String,)>("SELECT kind FROM integrations")
         .fetch_all(&app.db)
         .await
         .unwrap_or_default()
         .into_iter()
         .map(|(kind,)| kind)
         .collect();
+    // The web needs no connecting, only not to have been turned off.
+    if web::Policy::load(app).await.is_ok_and(|policy| policy.mode != web::Mode::Off) {
+        connected.push(hyperbeam_core::grants::WEB.to_string());
+    }
     let mut tools: Vec<Value> = catalog()
         .into_iter()
         .filter(|tool| match &tool.grant {
@@ -210,12 +216,16 @@ async fn call_connection(app: &App, session: &Session, conn: &Connection, tool_n
         .filter_map(|c| c.get("text").and_then(Value::as_str))
         .collect::<Vec<_>>()
         .join("\n");
+    // What a web search returns, the agent may go on to read.
+    if level == ToolLevel::Read && conn.preset().is_some_and(|preset| preset.search) {
+        web::remember_from_text(app, session, &text, "search").await;
+    }
     Ok(ToolOutput { text, target, result: Some(result) })
 }
 
 /// What a call was aimed at, for the audit trail.
 fn aimed_at(args: &Value) -> String {
-    ["repo", "id", "page_id", "key", "title", "issueId", "issue_id", "query"]
+    ["repo", "id", "page_id", "key", "title", "issueId", "issue_id", "query", "url"]
         .iter()
         .find_map(|k| args.get(*k).and_then(Value::as_str))
         .or_else(|| args.as_object().and_then(|o| o.values().find_map(Value::as_str)))
@@ -242,6 +252,7 @@ async fn call_tool(app: &App, session: &Session, name: &str, args: &Value) -> To
     }
     match name.split('_').next() {
         Some("github") => github::call(app, session, name, args).await,
+        Some("web") => web::call(app, session, name, args).await,
         _ => platform::call(app, session, name, args).await,
     }
 }
@@ -296,7 +307,7 @@ pub async fn handle(State(app): State<App>, parts: Parts, Json(request): Json<Va
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false } },
                     "serverInfo": { "name": "hyperbeam", "title": "Hyperbeam", "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": "Tools for acting on GitHub, the team's connected services, and the Hyperbeam platform. \
+                    "instructions": "Tools for acting on GitHub, the team's connected services, the web and the Hyperbeam platform. \
                                      A connected service's tools are named after it, e.g. `sentry_search_issues`. \
                                      Calls are checked against this session's permissions and are visible to the team.",
                 }),

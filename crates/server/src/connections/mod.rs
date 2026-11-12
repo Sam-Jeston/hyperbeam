@@ -26,7 +26,7 @@ use sqlx::types::Json;
 use std::collections::BTreeMap;
 
 /// Names custom connections may not take: built-in systems and presets.
-pub const RESERVED: &[&str] = &["github", "notion", "hyperbeam", "platform", "mcp"];
+pub const RESERVED: &[&str] = &["github", "notion", "hyperbeam", "platform", "mcp", "web"];
 
 /// Tools are re-listed in the background when this old.
 const STALE_AFTER_SECS: i64 = 6 * 3600;
@@ -367,6 +367,9 @@ impl App {
     pub async fn grant_catalog(&self) -> Result<Vec<Value>> {
         let info = |grant: &Grant, label: &str, title: &str| json!({ "id": grant.to_string(), "label": label, "system": grant.system(), "system_title": title });
         let mut list: Vec<Value> = Grant::GITHUB_ALL.iter().map(|g| info(g, g.label(), "GitHub")).collect();
+        if crate::gateway::web::Policy::load(self).await?.mode != crate::gateway::web::Mode::Off {
+            list.push(info(&Grant::WEB_READ, Grant::WEB_READ.label(), "Web"));
+        }
         for conn in all(&self.db).await? {
             list.push(info(&Grant::read(&conn.name)?, &conn.read_label(), &conn.title));
             list.push(info(&Grant::write(&conn.name)?, &conn.write_label(), &conn.title));

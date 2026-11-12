@@ -12,7 +12,7 @@ The transcript shows everything the agent does, as it happens:
 - **Messages** from people, and the agent’s replies.
 - **Thinking**, collapsed by default. Select it to read the agent’s reasoning.
 - **Tool calls**: files read and edited, commands run, searches. Each shows whether it is running, done or failed. Expand one to see its input and output; edits show the diff and how many lines were added and removed.
-- **Permission checks**: every request the agent made outside its sandbox, marked **Allowed**, **Failed** or **Blocked**.
+- **Permission checks**: every request the agent made outside its sandbox, marked **Allowed**, **Failed** or **Blocked**. Web pages it read appear here with their URL.
 
 The side panel shows the agent’s **plan** and progress through it, who started it, the harness and model, its repositories and branch, links to what it **produced** (such as pull requests), the agents it started, and what it **may do**.
 

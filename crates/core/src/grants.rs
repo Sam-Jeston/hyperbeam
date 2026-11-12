@@ -45,6 +45,8 @@ pub struct Grant {
 
 /// The system name GitHub's grants use.
 pub const GITHUB: &str = "github";
+/// The system name for reading the public web. It has one level, `read`.
+pub const WEB: &str = "web";
 
 impl Grant {
     /// Clone repositories, read issues, pull requests and code.
@@ -55,6 +57,9 @@ impl Grant {
     pub const GITHUB_OPEN_PR: Grant = Grant::builtin(GITHUB, Level::OpenPr);
     /// Merge pull requests and push to protected (default) branches.
     pub const GITHUB_MERGE_PR: Grant = Grant::builtin(GITHUB, Level::MergePr);
+
+    /// Read public web pages through the gateway's `web_fetch`.
+    pub const WEB_READ: Grant = Grant::builtin(WEB, Level::Read);
 
     pub const GITHUB_ALL: [Grant; 4] = [Grant::GITHUB_READ, Grant::GITHUB_WRITE, Grant::GITHUB_OPEN_PR, Grant::GITHUB_MERGE_PR];
 
@@ -91,6 +96,7 @@ impl Grant {
             (GITHUB, Level::Write) => "Push branches, comment, create issues",
             (GITHUB, Level::OpenPr) => "Open pull requests",
             (GITHUB, Level::MergePr) => "Merge pull requests",
+            (WEB, Level::Read) => "Read public web pages",
             (_, Level::Read) => "Use read tools",
             _ => "Use write tools",
         }
@@ -136,7 +142,7 @@ impl FromStr for Grant {
             "write" => Level::Write,
             _ => return Err(unknown()),
         };
-        if !valid_system(system) {
+        if !valid_system(system) || (system == WEB && level != Level::Read) {
             return Err(unknown());
         }
         Ok(Grant { system: Cow::Owned(system.to_string()), level })
@@ -341,7 +347,8 @@ mod tests {
     fn only_github_has_extra_levels_and_names_are_checked() {
         assert!("posthog:read".parse::<Grant>().is_ok());
         assert!("my-mcp2:write".parse::<Grant>().is_ok());
-        for bad in ["sentry:merge_pr", "Sentry:read", "my_mcp:read", "-x:read", "x-:read", "nocolon", ":read", "a:"] {
+        assert_eq!("web:read".parse::<Grant>().unwrap(), Grant::WEB_READ);
+        for bad in ["web:write", "sentry:merge_pr", "Sentry:read", "my_mcp:read", "-x:read", "x-:read", "nocolon", ":read", "a:"] {
             assert!(bad.parse::<Grant>().is_err(), "{bad}");
         }
     }

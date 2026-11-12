@@ -1,6 +1,7 @@
 use crate::app::App;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::gateway::web;
 use crate::integrations::{self, KINDS};
 use crate::store::{self, CredentialSlot, Harness, ModelChoice, Repo, Skill, Workflow};
 use axum::Json;
@@ -21,6 +22,7 @@ pub async fn get_settings(State(app): State<App>, _user: AuthUser) -> ApiResult<
         "egress_allow": store::get_setting(&app.db, "egress_allow").await?.unwrap_or(json!([])),
         "egress_allow_builtin": app.cfg.egress_allow,
         "egress_enforced": !app.cfg.egress_addr.is_empty(),
+        "web_access": web::Policy::load(&app).await?,
         "public_url": app.cfg.public_url,
         "idle_timeout_secs": app.cfg.idle_timeout_secs,
         "max_sessions": app.cfg.max_sessions,
@@ -32,6 +34,8 @@ pub struct SettingsBody {
     team_name: Option<String>,
     default_harness: Option<String>,
     egress_allow: Option<Vec<String>>,
+    /// Which pages agents may read with `web_fetch`.
+    web_access: Option<web::Policy>,
 }
 
 pub async fn put_settings(State(app): State<App>, actor: AuthUser, Json(body): Json<SettingsBody>) -> ApiResult<Json<Value>> {
@@ -46,6 +50,10 @@ pub async fn put_settings(State(app): State<App>, actor: AuthUser, Json(body): J
     if let Some(hosts) = &body.egress_allow {
         let hosts = clean_hosts(hosts)?;
         store::set_setting(&app.db, "egress_allow", &json!(hosts)).await?;
+    }
+    if let Some(policy) = &body.web_access {
+        let policy = web::Policy { mode: policy.mode, domains: clean_hosts(&policy.domains)? };
+        store::set_setting(&app.db, "web_access", &json!(policy)).await?;
     }
     get_settings(State(app), actor).await
 }

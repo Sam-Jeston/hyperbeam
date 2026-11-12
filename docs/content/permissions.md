@@ -23,9 +23,12 @@ An admin’s own agents are still limited to the grants ticked for them. Being a
 | `github:write` | push branches (not the default branch); comment; create issues |
 | `github:open_pr` | open pull requests |
 | `github:merge_pr` | merge pull requests; push to the default branch |
+| `web:read` | read public web pages with `web_fetch`. See [Web access](/security#web-access) |
 | `<connection>:read` / `<connection>:write` | use a [connection](/integrations#connected-services)’s read / write tools, e.g. `linear:write`, `notion:read` |
 
-Each connection adds its own two columns to **People & permissions**. Only permissions on GitHub and connections that exist can be granted.
+Each connection adds its own two columns to **People & permissions**. Only permissions on GitHub, the web (unless an admin has turned web access off) and connections that exist can be granted.
+
+The person who sets up the installation starts with every GitHub grant and `web:read`. Everyone else holds what they are given.
 
 Every stronger grant depends on `read` for its system. Ticking one ticks `read` too, and unticking `read` removes everything else for that system.
 

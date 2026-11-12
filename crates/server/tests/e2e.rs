@@ -261,6 +261,25 @@ async fn notion_token(State(mcp): State<FakeMcp>, body: String) -> Response {
     axum::Json(json!({ "access_token": format!("at-{}", oauth.issued), "refresh_token": format!("rt-{}", oauth.issued), "token_type": "bearer", "expires_in": 3600 })).into_response()
 }
 
+/// A small website for agents to read: (`site`, page) is recorded for each request.
+async fn site(State(mcp): State<FakeMcp>, Path(page): Path<String>) -> Response {
+    mcp.calls.lock().unwrap().push(("site".to_string(), page.clone(), Value::Null));
+    let html = |body: &str| Response::builder().header("content-type", "text/html; charset=utf-8").body(axum::body::Body::from(body.to_string())).unwrap();
+    match page.as_str() {
+        "docs" => html(
+            r#"<html><head><title>Acme docs</title></head><body><h1>Welcome</h1>
+               <p>Start with <a href="guide">the guide</a>, <a href="/site/moved">the old guide</a> or <a href="binary">the installer</a>.</p>
+               <script>track()</script></body></html>"#,
+        ),
+        "guide" => html("<h1>Guide</h1><p>Run <code>acme init</code>.</p>"),
+        "moved" => Response::builder().status(StatusCode::FOUND).header("location", "guide").body(axum::body::Body::empty()).unwrap(),
+        "found" => html("<p>Found by search.</p>"),
+        "secret" => html("<p>Top secret.</p>"),
+        "binary" => Response::builder().header("content-type", "application/octet-stream").body(axum::body::Body::from(vec![0u8; 16])).unwrap(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 impl FakeMcp {
     fn router(self) -> Router {
         Router::new()
@@ -272,6 +291,8 @@ impl FakeMcp {
             .route("/notion-auth/token", post(notion_token))
             .route("/custom/mcp", post(|s: State<FakeMcp>, h: HeaderMap, b: axum::Json<Value>| async move { s.0.serve("custom", &h, b.0) }))
             .route("/linear/mcp", post(|s: State<FakeMcp>, h: HeaderMap, b: axum::Json<Value>| async move { s.0.serve("linear", &h, b.0) }))
+            .route("/exa/mcp", post(|s: State<FakeMcp>, h: HeaderMap, b: axum::Json<Value>| async move { s.0.serve("exa", &h, b.0) }))
+            .route("/site/{page}", get(site))
             .route("/linear/mcp/readonly", post(|s: State<FakeMcp>, h: HeaderMap, b: axum::Json<Value>| async move { s.0.serve("linear-readonly", &h, b.0) }))
             .with_state(self)
     }
@@ -288,6 +309,10 @@ impl FakeMcp {
                 { "name": "notion-search", "description": "Search the workspace", "inputSchema": { "type": "object" } },
                 { "name": "notion-create-pages", "description": "Create pages", "inputSchema": { "type": "object" } },
                 { "name": "notion-summon", "description": "Something new", "inputSchema": { "type": "object" } },
+            ] }),
+            ("exa", _) => json!({ "tools": [
+                { "name": "web_search_exa", "description": "Search the web", "annotations": { "readOnlyHint": true }, "inputSchema": { "type": "object" } },
+                { "name": "web_fetch_exa", "description": "Fetch any URL", "annotations": { "readOnlyHint": true }, "inputSchema": { "type": "object" } },
             ] }),
             ("linear", _) => json!({ "tools": [
                 { "name": "list_issues", "description": "List issues", "inputSchema": { "type": "object" } },
@@ -321,7 +346,11 @@ impl FakeMcp {
             "tools/call" => {
                 let (tool, args) = (message["params"]["name"].as_str().unwrap_or_default().to_string(), message["params"]["arguments"].clone());
                 self.calls.lock().unwrap().push((server.to_string(), tool.clone(), args.clone()));
-                json!({ "content": [{ "type": "text", "text": format!("{server} ran {tool} with {args}") }] })
+                let text = match tool.as_str() {
+                    "web_search_exa" => format!("Title: The found page\nURL: {}/site/found\nText: Found by search.", self.oauth.lock().unwrap().base),
+                    _ => format!("{server} ran {tool} with {args}"),
+                };
+                json!({ "content": [{ "type": "text", "text": text }] })
             }
             _ => return axum::Json(json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "method not found" } })).into_response(),
         };
@@ -459,7 +488,9 @@ impl Harness {
             "--github-git-url", &format!("http://{gh_addr}/git"),
             "--egress-addr", &egress_addr,
             "--egress-allow", "allowed.invalid",
-            "--preset-urls", &format!("linear={mcp_base}/linear/mcp,notion={mcp_base}/notion/mcp"),
+            "--preset-urls", &format!("linear={mcp_base}/linear/mcp,notion={mcp_base}/notion/mcp,exa={mcp_base}/exa/mcp"),
+            // The site the agents read in these tests is on this machine.
+            "--web-allow-private",
         ])
         .cfg;
         let (app, router) = hyperbeam_server::build(cfg).await.expect("server builds");
@@ -747,6 +778,115 @@ async fn a_workers_question_goes_to_its_conductor() {
     assert!(text_of(&events, "agent_message").contains("Deploying to eu-west."));
 }
 
+/// Output of the most recent `web_fetch` of a URL containing `url_contains`.
+fn fetch_output(events: &[Value], url_contains: &str) -> String {
+    let call = events
+        .iter()
+        .rev()
+        .find(|e| e["kind"] == "tool_call" && e["data"]["rawInput"]["url"].as_str().is_some_and(|u| u.contains(url_contains)))
+        .unwrap_or_else(|| panic!("no fetch of a URL like {url_contains}"));
+    let (id, seq) = (&call["data"]["toolCallId"], call["seq"].as_i64().unwrap());
+    events
+        .iter()
+        .filter(|e| e["kind"] == "tool_call_update" && &e["data"]["toolCallId"] == id && e["seq"].as_i64().unwrap() > seq)
+        .filter_map(|e| e["data"]["content"][0]["content"]["text"].as_str())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_read_the_web_through_the_gateway() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    let site = format!("{}/site", h.mcp_base);
+    let fetch = |page: &str| format!("!mcp web_fetch {{\"url\": \"{site}/{page}\"}}");
+    // The same call, with the URL spelled so that it does not appear in the
+    // message: the agent arrives at it without a person having written it.
+    let unwritten = |page: &str| format!("!mcp web_fetch {{\"url\": \"{site}/\\u00{:02x}{}\"}}", page.as_bytes()[0], &page[1..]);
+    let site_hits = |page: &str| h.mcp.calls.lock().unwrap().iter().filter(|(server, name, _)| server == "site" && name == page).count();
+
+    // The owner may read the web from the start, and the tool is offered.
+    let catalog: Vec<String> = owner.get("/grants").await["grants"].as_array().unwrap().iter().map(|g| g["id"].as_str().unwrap().to_string()).collect();
+    assert!(catalog.contains(&"web:read".to_string()), "{catalog:?}");
+
+    let prompt = format!(
+        "Read {site}/docs and follow it.\n!tools\n{}\n{}\n{}\n{}\n{}",
+        fetch("docs"),
+        unwritten("guide"),
+        unwritten("moved"),
+        unwritten("secret?token=hunter2"),
+        unwritten("binary"),
+    );
+    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "scripted" })).await;
+    let id = created["session"]["id"].as_str().unwrap();
+    let events = owner.wait_turns(id, 1).await;
+    assert!(tool_output(&events, "tools/list").split(' ').any(|t| t == "web_fetch"));
+
+    // A URL a person wrote is fetched, and arrives as markdown with its
+    // links made absolute.
+    let docs = fetch_output(&events, "/site/docs");
+    assert!(docs.contains("# Acme docs") && docs.contains(&format!("Source: {site}/docs")), "{docs}");
+    assert!(docs.contains(&format!("[the guide]({site}/guide)")) && !docs.contains("track()"), "{docs}");
+    // What that page links to may be followed, redirects included.
+    assert!(fetch_output(&events, "/site/guide").contains("acme init"));
+    assert!(fetch_output(&events, "/site/moved").contains(&format!("Source: {site}/guide")));
+    assert!(fetch_output(&events, "/site/binary").contains("not a page of text"));
+    // A URL the agent put together itself is refused before any request is
+    // made, and the team sees the attempt.
+    let secret = fetch_output(&events, "/site/secret");
+    assert!(secret.starts_with("Denied") && secret.contains("put together yourself"), "{secret}");
+    assert_eq!(site_hits("secret"), 0);
+    let denied: Vec<&str> = events.iter().filter(|e| e["kind"] == "gateway" && e["data"]["allowed"] == false).filter_map(|e| e["data"]["target"].as_str()).collect();
+    assert_eq!(denied, [format!("{site}/secret?token=hunter2")]);
+
+    // Limited to listed sites: a URL a person wrote is no longer enough.
+    owner.ok(Method::PUT, "/settings", Some(json!({ "web_access": { "mode": "listed", "domains": ["docs.example.com"] } }))).await;
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": fetch("docs") })).await;
+    let events = owner.wait_turns(id, 2).await;
+    assert!(fetch_output(&events, "/site/docs").contains("not one of the sites"));
+    // On a listed site an agent may read any page.
+    owner.ok(Method::PUT, "/settings", Some(json!({ "web_access": { "mode": "listed", "domains": ["127.0.0.1"] } }))).await;
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": unwritten("secret") })).await;
+    let events = owner.wait_turns(id, 3).await;
+    assert!(fetch_output(&events, "/site/secret").contains("Top secret."));
+
+    // Turned off: the tool and its permission disappear.
+    owner.ok(Method::PUT, "/settings", Some(json!({ "web_access": { "mode": "off" } }))).await;
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": format!("!tools\n{}", fetch("docs")) })).await;
+    let events = owner.wait_turns(id, 4).await;
+    assert!(!tool_output(&events, "tools/list").split(' ').any(|t| t == "web_fetch"));
+    assert!(fetch_output(&events, "/site/docs").contains("turned off"));
+    assert!(!owner.get("/grants").await["grants"].as_array().unwrap().iter().any(|g| g["id"] == "web:read"));
+    let (status, _) = owner.call(Method::PUT, "/settings", Some(json!({ "web_access": { "mode": "known", "domains": ["not a host"] } }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    owner.ok(Method::PUT, "/settings", Some(json!({ "web_access": { "mode": "known", "domains": [] } }))).await;
+
+    // A web search connection: search is cleared, the vendor's own fetcher
+    // waits for an admin, and what a search returns may be read.
+    let exa = owner.post("/connections", json!({ "preset": "exa", "secret": "lin_api_test" })).await["connection"].clone();
+    assert_eq!(exa["tools_error"], Value::Null, "{exa}");
+    let levels: Vec<String> = exa["tools"].as_array().unwrap().iter().map(|t| format!("{}={}", t["name"].as_str().unwrap(), t["level"].as_str().unwrap())).collect();
+    assert_eq!(levels, ["web_search_exa=read", "web_fetch_exa=hidden"]);
+    let me = owner.get("/me").await["user"].clone();
+    let mut grants: Vec<Value> = me["grants"].as_array().unwrap().clone();
+    grants.push(json!("exa:read"));
+    owner.ok(Method::PATCH, &format!("/users/{}", me["id"].as_str().unwrap()), Some(json!({ "grants": grants }))).await;
+    let prompt = format!("!mcp exa_web_search_exa {{\"query\": \"acme\", \"objective\": \"docs\"}}\n{}\n{}", unwritten("found"), unwritten("guide"));
+    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "scripted" })).await;
+    let searcher = created["session"]["id"].as_str().unwrap();
+    let events = owner.wait_turns(searcher, 1).await;
+    assert!(tool_output(&events, "exa_web_search_exa").contains("/site/found"));
+    assert!(fetch_output(&events, "/site/found").contains("Found by search."));
+    // What one session found is not another's to fetch.
+    assert!(fetch_output(&events, "/site/guide").starts_with("Denied"));
+
+    // Someone without the permission has no such tool.
+    let mia = h.member(&owner, "mia@example.com", &[]).await;
+    let created = mia.post("/sessions", json!({ "prompt": format!("!tools\n{}", fetch("docs")), "harness": "scripted" })).await;
+    let events = mia.wait_turns(created["session"]["id"].as_str().unwrap(), 1).await;
+    assert!(!tool_output(&events, "tools/list").split(' ').any(|t| t == "web_fetch"));
+    assert!(fetch_output(&events, "/site/docs").contains("does not hold `web:read`"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn only_people_who_could_have_launched_an_agent_may_direct_it() {
     let Some(h) = Harness::start().await else { return };
@@ -1005,7 +1145,7 @@ async fn notion_connects_by_oauth_and_keeps_its_token_fresh() {
     let notion = |listing: &Value| listing["connections"].as_array().unwrap().iter().find(|c| c["name"] == "notion").cloned();
 
     // Notion's permissions are not handed out before it is connected.
-    assert_eq!(owner.get("/me").await["user"]["grants"], json!(["github:read", "github:write", "github:open_pr", "github:merge_pr"]));
+    assert_eq!(owner.get("/me").await["user"]["grants"], json!(["github:read", "github:write", "github:open_pr", "github:merge_pr", "web:read"]));
 
     // Connecting takes no key: the admin is sent to Notion to sign in. A member is not.
     let mia = h.member(&owner, "mia@example.com", &[]).await;

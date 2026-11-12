@@ -51,6 +51,14 @@ Exactly one of the three master key settings is required. See [Credentials](/cre
 
 Admins can add more hosts under **Settings → General**, and each harness profile adds its own. See [Network egress](/security#network-egress).
 
+## Web access
+
+| Variable | Default | What it does |
+|---|---|---|
+| `HYPERBEAM_WEB_ALLOW_PRIVATE` | `false` | Let `web_fetch` read pages on private and loopback addresses, for documentation on an internal network. With it on, an agent can read anything the server can reach. |
+
+Which pages agents may read is set under **Settings → General**. See [Web access](/security#web-access).
+
 ## Integrations
 
 These point Hyperbeam at the services’ APIs. Change them only for testing or a self-hosted GitHub.

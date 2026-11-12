@@ -1,6 +1,6 @@
 ---
 title: Integrations
-description: Connect GitHub, first-class services like Linear, Notion, PostHog and Sentry, and any other MCP server.
+description: Connect GitHub, first-class services like Linear, Notion, PostHog, Sentry and web search, and any other MCP server.
 ---
 
 Integrations are set under **Settings → Integrations** by an admin. Their credentials stay in Hyperbeam’s control plane. Agents never see them: every request an agent makes goes through Hyperbeam, which checks it against the permissions of the person who started the agent. Select **Test** on a connected integration to check its credential.
@@ -36,8 +36,15 @@ These connect with one credential or one sign-in, and Hyperbeam sorts their tool
 | **Notion** | None: select **Sign in with Notion** and choose, in Notion, what to share. See [Signing in with OAuth](#signing-in-with-oauth). | By tool name, ignoring the `notion-` every tool starts with: `search`, `fetch`, `get-`, `list-`, `query-` and `view-` tools are read tools, and `create-`, `update-`, `delete-`, `move-` and `duplicate-` tools, among others, are write tools. Anything else waits for you. Agents see the tools without the extra prefix, as `notion_search` and so on. |
 | **PostHog** | A personal API key created with the *MCP Server* preset. Choose US or EU Cloud, and optionally limit which features’ tools are offered. | By PostHog’s read-only mode, the same way as Linear. |
 | **Sentry** | A user auth token with `org:read`, `project:read` and `event:read`, plus `project:write` and `event:write` if agents may change things. Optionally name one organization. sentry.io only. | By tool name: `get_`, `find_`, `search_` and `list_` tools are read tools (unless Sentry marks them as making changes), and `create_`, `update_`, `add_`, `delete_` and `remove_` tools are write tools. Anything else waits for you. |
+| **Exa web search** | An Exa API key (*dashboard.exa.ai → API keys*). Searches are billed to it, and what agents search for is sent to Exa. | By tool name: the search tool is a read tool. Exa’s own page fetcher waits for you; see [Web search](#web-search). |
 
 Agents act as the credential’s user, or as the account that signed in. Hyperbeam re-lists each connection’s tools every few hours, and when you select **Re-list tools**.
+
+### Web search
+
+Connect **Exa web search** to give agents a search tool, `exa_web_search_exa`, for people who hold `exa:read`. URLs a search returns are ones the agent may then read with `web_fetch`. See [Web access](/security#web-access).
+
+Exa also offers a tool that fetches any URL. It is hidden until an admin clears it, like any unsorted tool. Leave it hidden unless you accept that agents can then send a URL of their own writing to any site: `web_fetch` exists to avoid exactly that.
 
 ### Custom connections
 

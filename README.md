@@ -44,6 +44,7 @@ runner dials out to the control plane; nothing connects in. That token is what t
 |---|---|---|
 | `/git/…` | `git clone`, `fetch`, `push` | repository is one of the session's; `github:read` to fetch, `github:write` to push, `github:merge_pr` to push to the default branch |
 | `/mcp` | tools for GitHub, connected MCP servers and the platform | the grant each tool needs, the repository, and for connections that an admin cleared the tool |
+| `/mcp` `web_fetch` | reading public web pages | `web:read`; the URL is one a person gave the agent, a search returned or a fetched page links to; the address is public |
 | egress proxy | everything else on the network | host is on the allowlist |
 
 The token is revoked the moment the session ends. Grants are evaluated against what the session's owner

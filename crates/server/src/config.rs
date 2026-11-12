@@ -151,6 +151,12 @@ pub struct Config {
     #[arg(long, env = "HYPERBEAM_GITHUB_GIT_URL", default_value = "https://github.com")]
     pub github_git_url: String,
 
+    /// Let `web_fetch` read pages on private and loopback addresses, for
+    /// documentation that lives on an internal network. Off by default: with
+    /// it on, an agent can read anything this server can reach.
+    #[arg(long, env = "HYPERBEAM_WEB_ALLOW_PRIVATE")]
+    pub web_allow_private: bool,
+
     /// Point first-class connections somewhere else, as `preset=url`
     /// (e.g. `linear=http://127.0.0.1:9000/mcp`). For testing.
     #[arg(long, env = "HYPERBEAM_PRESET_URLS", value_delimiter = ',', hide = true)]

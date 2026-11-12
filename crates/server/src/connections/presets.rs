@@ -42,6 +42,9 @@ pub struct Preset {
     pub read_label: &'static str,
     pub write_label: &'static str,
     pub classify: Classify,
+    /// A web search: URLs in what its read tools return are ones an agent
+    /// may go on to read with `web_fetch`.
+    pub search: bool,
     /// Options an admin may set, shown in the connect dialog.
     pub options: fn() -> Value,
     /// The server URL for the chosen options.
@@ -68,6 +71,7 @@ pub const PRESETS: &[Preset] = &[
         read_label: "Read issues, projects and comments",
         write_label: "Create and update issues, projects and comments",
         classify: Classify::ReadOnlyVariant(Variant::PathSuffix("/readonly")),
+        search: false,
         options: || json!([]),
         url: |_| "https://mcp.linear.app/mcp".into(),
     },
@@ -88,6 +92,7 @@ pub const PRESETS: &[Preset] = &[
         read_label: "Query data; read insights, flags, experiments and errors",
         write_label: "Create and change insights, flags, experiments and more",
         classify: Classify::ReadOnlyVariant(Variant::Header("x-posthog-read-only", "true")),
+        search: false,
         options: || {
             json!([
                 { "key": "region", "label": "Region", "choices": [{ "value": "us", "label": "US Cloud" }, { "value": "eu", "label": "EU Cloud" }], "default": "us" },
@@ -126,6 +131,7 @@ pub const PRESETS: &[Preset] = &[
             read: &["get_", "find_", "search_", "list_", "whoami"],
             write: &["create_", "update_", "add_", "delete_", "remove_"],
         },
+        search: false,
         options: || {
             json!([{ "key": "organization", "label": "Organization slug", "placeholder": "acme",
                      "hint": "Optional. Limits agents to one organization." }])
@@ -160,8 +166,31 @@ pub const PRESETS: &[Preset] = &[
                 "spawn_", "stop_", "upload_", "convert_", "calendar_create_", "calendar_update_", "calendar_cancel_",
             ],
         },
+        search: false,
         options: || json!([]),
         url: |_| "https://mcp.notion.com/mcp".into(),
+    },
+    Preset {
+        id: "exa",
+        title: "Exa web search",
+        blurb: "Lets agents search the web. What a search returns, they can go on to read with web_fetch.",
+        secret_label: "API key",
+        secret_help: "An Exa API key (dashboard.exa.ai → API keys). Searches are billed to this key. \
+                      What agents search for is sent to Exa.",
+        auth_header: "Authorization",
+        auth_prefix: "Bearer ",
+        oauth: false,
+        tool_prefix: "",
+        headers: &[],
+        read_label: "Search the web",
+        write_label: "Use tools an admin has marked as writing",
+        // Only search is cleared by default. Exa's own page fetcher takes any
+        // URL an agent writes, which `web_fetch` exists to avoid, so it waits
+        // for an admin like any other unsorted tool.
+        classify: Classify::Prefixes { read: &["web_search"], write: &[] },
+        search: true,
+        options: || json!([]),
+        url: |_| "https://mcp.exa.ai/mcp".into(),
     },
 ];
 
@@ -260,6 +289,15 @@ mod tests {
         assert_eq!(sentry.by_prefix("get_or_create_thing", &json!({ "readOnlyHint": false })), Some(ToolLevel::Write));
         assert_eq!(sentry.by_prefix("update_issue", &json!({ "readOnlyHint": true })), Some(ToolLevel::Write));
         assert_eq!(sentry.by_prefix("analyze_issue_with_seer", &json!({})), None);
+    }
+
+    #[test]
+    fn a_search_preset_clears_search_and_nothing_that_fetches() {
+        let exa = find("exa").unwrap();
+        assert!(exa.search);
+        assert_eq!(exa.by_prefix("web_search_exa", &json!({ "readOnlyHint": true })), Some(ToolLevel::Read));
+        assert_eq!(exa.by_prefix("web_fetch_exa", &json!({ "readOnlyHint": true })), None);
+        assert!(PRESETS.iter().filter(|p| p.search).all(|p| p.id == "exa"));
     }
 
     #[test]
