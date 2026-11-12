@@ -75,7 +75,7 @@ The server needs `kms:GenerateDataKey` and `kms:Decrypt` on the key. Both calls 
 > [!WARNING]
 > Scheduling the KMS key for deletion makes every stored credential unreadable. Rotating its key material in KMS is safe.
 
-An installation that already holds credentials under a directly supplied key can’t switch to KMS: the server refuses to start rather than generate a key that can’t read them. Use Secrets Manager for such an installation, or enter the credentials again.
+An installation that already holds credentials under a directly supplied key can’t switch to KMS by changing the setting alone: the server refuses to start rather than generate a key that can’t read them. Move it with [`rotate-master-key`](#rotating-the-master-key).
 
 ### AWS credentials and region
 
@@ -83,7 +83,70 @@ The server finds AWS credentials the way the AWS SDKs do: environment variables,
 
 With the Helm chart, set `aws.masterKeySecret` or `aws.kmsKeyId` instead of `masterKey`. See [Install on Kubernetes](/install-kubernetes#keep-the-master-key-in-aws).
 
-### Backups and rotation
+### Backups
 
 > [!IMPORTANT]
-> Back up a master key you supply yourself, and don’t change it. Hyperbeam can’t yet rotate the master key: credentials stored under one key can’t be read with another, and would have to be entered again.
+> Back up a master key you supply yourself. Credentials stored under one key can’t be read with another, so changing the setting on its own makes them unreadable. To change the key, rotate it.
+
+## Rotating the master key
+
+`hyperbeam-server rotate-master-key` re-encrypts every stored credential under a new key. It reads the current key from the same settings as the server, and takes the new one as an option:
+
+| New key | Option |
+|---|---|
+| Given directly | `--new-master-key` (or `HYPERBEAM_NEW_MASTER_KEY`) |
+| AWS Secrets Manager | `--new-master-key-aws-secret` |
+| AWS KMS | `--new-master-key-aws-kms-key` |
+
+The new key doesn’t have to come from the same kind of source as the current one, so this is also how you move an installation from a directly supplied key to KMS, or back.
+
+Rotation happens in one database transaction: afterwards every credential is under the new key, or, if anything went wrong, nothing has changed. If the current key can’t read a stored credential, the command stops and names it. Running the command again after it has succeeded does no harm.
+
+> [!IMPORTANT]
+> Restart the server with the new key straight after rotating. A server that is still running holds the old key: it can’t read stored credentials until it restarts, and a credential saved through it in the meantime has to be entered again.
+
+### A key given directly
+
+```bash
+NEW=$(hyperbeam-server gen-key)
+hyperbeam-server rotate-master-key --new-master-key "$NEW"
+```
+
+Then set `HYPERBEAM_MASTER_KEY` to the new key and restart. Back up the new key before you rotate.
+
+On Kubernetes, run the command in the server’s pod, where the current settings are already in place, and then give the chart the new key. The upgrade restarts the server:
+
+```bash
+NEW=$(openssl rand -base64 32)
+kubectl -n hyperbeam exec deploy/hyperbeam -- hyperbeam-server rotate-master-key --new-master-key "$NEW"
+helm upgrade hyperbeam deploy/helm/hyperbeam -n hyperbeam --reuse-values --set masterKey="$NEW"
+```
+
+If you manage the Secret yourself (`existingSecret`), update its `master-key` and restart the deployment instead.
+
+### AWS Secrets Manager
+
+Put the new key in the same secret, and name that secret as the new source. Secrets Manager keeps the value it replaced as the secret’s previous version, and the command reads the old key from there:
+
+```bash
+aws secretsmanager put-secret-value --secret-id hyperbeam/master-key \
+  --secret-string "$(openssl rand -base64 32)"
+
+hyperbeam-server rotate-master-key --new-master-key-aws-secret hyperbeam/master-key
+```
+
+Then restart the server. Run the two commands together: a server that restarts between them reads the new key before the credentials have been moved to it.
+
+You can also name a different secret, and point `HYPERBEAM_MASTER_KEY_AWS_SECRET` at it afterwards.
+
+### AWS KMS
+
+Name the KMS key to wrap the new master key under. It can be the one already in use:
+
+```bash
+hyperbeam-server rotate-master-key --new-master-key-aws-kms-key alias/hyperbeam
+```
+
+The command generates a new master key, re-encrypts the credentials, and replaces the wrapped key in Postgres. Then restart the server, with `HYPERBEAM_MASTER_KEY_AWS_KMS_KEY` changed if you named a different KMS key.
+
+This replaces the master key itself. Rotating the KMS key’s material in AWS is separate, needs nothing from Hyperbeam, and doesn’t change the master key.

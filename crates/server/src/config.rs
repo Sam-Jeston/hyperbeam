@@ -28,6 +28,41 @@ pub struct MasterKeyArgs {
     pub aws_kms_key: Option<String>,
 }
 
+/// The key `rotate-master-key` moves stored credentials to. Exactly one must
+/// be given; it may be a different kind of source from the current one.
+#[derive(Debug, Clone, Default, Args)]
+#[group(id = "new_master_key_source", required = true, multiple = false)]
+pub struct NewMasterKeyArgs {
+    /// The new key itself: 32 random bytes, base64. See `gen-key`.
+    #[arg(long, env = "HYPERBEAM_NEW_MASTER_KEY", hide_env_values = true)]
+    pub new_master_key: Option<String>,
+
+    /// Name or ARN of an AWS Secrets Manager secret that holds the new key.
+    /// Naming the current secret rotates in place: the new key is the
+    /// secret's current value, the old one its previous value.
+    #[arg(long = "new-master-key-aws-secret", env = "HYPERBEAM_NEW_MASTER_KEY_AWS_SECRET")]
+    pub new_aws_secret: Option<String>,
+
+    /// ID, alias or ARN of an AWS KMS key. A new master key is generated and
+    /// stored in the database wrapped under it. May be the current KMS key.
+    #[arg(long = "new-master-key-aws-kms-key", env = "HYPERBEAM_NEW_MASTER_KEY_AWS_KMS_KEY")]
+    pub new_aws_kms_key: Option<String>,
+}
+
+/// `rotate-master-key`: the installation as it is configured now, plus the
+/// key to move it to.
+#[derive(Debug, Clone, Args)]
+pub struct RotateArgs {
+    #[arg(long, env = "HYPERBEAM_DATABASE_URL", hide_env_values = true)]
+    pub database_url: String,
+
+    #[command(flatten)]
+    pub current: MasterKeyArgs,
+
+    #[command(flatten)]
+    pub new: NewMasterKeyArgs,
+}
+
 #[derive(Debug, Clone, Args)]
 pub struct Config {
     #[arg(long, env = "HYPERBEAM_DATABASE_URL", hide_env_values = true)]

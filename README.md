@@ -258,6 +258,9 @@ hyperbeam stop 3ff6c49b
 | `HYPERBEAM_EGRESS_ALLOW` | hosts every sandbox may reach |
 | `HYPERBEAM_IDLE_TIMEOUT_SECS`, `HYPERBEAM_MAX_SESSIONS` | sandbox lifetime and concurrency |
 
+To change the master key of an installation that holds credentials, run `hyperbeam-server rotate-master-key`
+(it re-encrypts them under the new key, and can move between the three sources), then restart the server.
+
 ### Adding a harness
 
 Any agent that speaks ACP on stdio can be added under *Settings → Harnesses*: a container image with

@@ -17,7 +17,7 @@ The server is configured with environment variables, or the matching command-lin
 | `HYPERBEAM_PUBLIC_URL` | `http://localhost:8080` | Where people reach the UI. Used in invite links. |
 | `HYPERBEAM_INTERNAL_URL` | `http://127.0.0.1:8080` | Where sandboxes reach the server. |
 
-Exactly one of the three master key settings is required. See [Credentials](/credentials#the-master-key).
+Exactly one of the three master key settings is required. See [Credentials](/credentials#the-master-key). To change the key of an installation that holds credentials, use [`rotate-master-key`](/credentials#rotating-the-master-key).
 
 ## Sandboxes
 

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use hyperbeam_server::config::Config;
-use hyperbeam_server::{build, crypto, egress};
+use hyperbeam_server::config::{Config, RotateArgs};
+use hyperbeam_server::{build, crypto, egress, masterkey};
 
 #[derive(Parser)]
 #[command(name = "hyperbeam-server", version, about = "Hyperbeam control plane")]
@@ -15,6 +15,9 @@ enum Command {
     Serve(Box<Config>),
     /// Print a new master key, for HYPERBEAM_MASTER_KEY or to store in AWS Secrets Manager.
     GenKey,
+    /// Re-encrypt every stored credential under a new master key. Reads the
+    /// current key the way `serve` does; restart the server afterwards.
+    RotateMasterKey(Box<RotateArgs>),
 }
 
 #[tokio::main]
@@ -26,6 +29,11 @@ async fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::GenKey => {
             println!("{}", crypto::SecretBox::generate_key());
+            Ok(())
+        }
+        Command::RotateMasterKey(args) => {
+            let outcome = masterkey::rotate_configured(&args).await?;
+            println!("{outcome}");
             Ok(())
         }
         Command::Serve(cfg) => {

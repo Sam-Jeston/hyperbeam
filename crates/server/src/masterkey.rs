@@ -1,7 +1,8 @@
 //! Where the master key comes from: given directly, read from AWS Secrets
-//! Manager, or generated once and kept wrapped under an AWS KMS key.
+//! Manager, or generated once and kept wrapped under an AWS KMS key. Also
+//! moving an installation from one key to another.
 
-use crate::config::MasterKeyArgs;
+use crate::config::{MasterKeyArgs, RotateArgs};
 use crate::crypto::SecretBox;
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -18,7 +19,7 @@ pub async fn load(args: &MasterKeyArgs, db: &PgPool) -> Result<SecretBox> {
         return SecretBox::from_base64(key).context("HYPERBEAM_MASTER_KEY");
     }
     if let Some(secret_id) = &args.aws_secret {
-        return from_secrets_manager(secret_id).await.with_context(|| format!("HYPERBEAM_MASTER_KEY_AWS_SECRET ({secret_id})"));
+        return from_secrets_manager(secret_id, None).await.with_context(|| format!("HYPERBEAM_MASTER_KEY_AWS_SECRET ({secret_id})"));
     }
     if let Some(key_id) = &args.aws_kms_key {
         let kms = AwsKms { client: aws_sdk_kms::Client::new(&aws(key_id).await), key_id: key_id.clone() };
@@ -47,11 +48,14 @@ fn arn_region(resource: &str) -> Option<&str> {
 
 // ---------------------------------------------------------- Secrets Manager
 
-async fn from_secrets_manager(secret_id: &str) -> Result<SecretBox> {
+/// `stage` picks a version of the secret by its staging label; the default
+/// is the current one (`AWSCURRENT`).
+async fn from_secrets_manager(secret_id: &str, stage: Option<&str>) -> Result<SecretBox> {
     let client = aws_sdk_secretsmanager::Client::new(&aws(secret_id).await);
     let out = client
         .get_secret_value()
         .secret_id(secret_id)
+        .set_version_stage(stage.map(str::to_string))
         .send()
         .await
         .map_err(|e| anyhow!("could not read the secret: {}", aws_sdk_secretsmanager::error::DisplayErrorContext(&e)))?;
@@ -142,7 +146,7 @@ pub async fn enveloped(db: &PgPool, wrapper: &dyn KeyWrapper) -> Result<SecretBo
         if existing > 0 {
             bail!(
                 "this installation already holds {existing} credential(s) encrypted under a master key that was supplied directly. \
-                 Keep using that key, or remove the stored credentials and enter them again after switching"
+                 Keep using that key, or move them to KMS with `hyperbeam-server rotate-master-key --new-master-key-aws-kms-key`"
             );
         }
         let (_, wrapped) = wrapper.generate().await?;
@@ -162,6 +166,141 @@ pub async fn enveloped(db: &PgPool, wrapper: &dyn KeyWrapper) -> Result<SecretBo
 async fn stored(db: &PgPool) -> Result<Option<Vec<u8>>> {
     let row: Option<(Vec<u8>,)> = sqlx::query_as("SELECT wrapped FROM master_key").fetch_optional(db).await?;
     Ok(row.map(|r| r.0))
+}
+
+// ----------------------------------------------------------------- Rotation
+
+/// The key a rotation moves the installation to.
+pub enum NewKey<'a> {
+    /// One the operator holds, directly or in a secret store. Nothing about
+    /// it is kept in the database.
+    Supplied(&'a SecretBox),
+    /// A fresh data key from this service, kept in the database wrapped.
+    Enveloped(&'a dyn KeyWrapper),
+}
+
+/// What a rotation did.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Rotated {
+    /// Credentials re-encrypted under the new key.
+    pub moved: usize,
+    /// Credentials the new key could already read: an earlier run got there.
+    pub already: usize,
+}
+
+impl std::fmt::Display for Rotated {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "re-encrypted {} credential(s) under the new master key", self.moved)?;
+        if self.already > 0 {
+            write!(f, "; {} were already under it", self.already)?;
+        }
+        write!(f, ". Restart the server with the new key now: until then it cannot read them, and credentials saved through it are lost")
+    }
+}
+
+/// Re-encrypt every stored credential from `current` to `new`, and make the
+/// wrapped key in the database match. All in one transaction: either the
+/// whole installation is on the new key afterwards or nothing has changed.
+///
+/// A server that is still running keeps the old key in memory, so it has to
+/// be restarted (with the new source, if that changed) straight afterwards.
+pub async fn rotate(db: &PgPool, current: &SecretBox, new: NewKey<'_>) -> Result<Rotated> {
+    // The KMS call comes first: a transaction should not wait on the network.
+    // If the rotation then fails, the generated key was never used.
+    let (target, wrapped) = match new {
+        NewKey::Supplied(target) => {
+            // Rotating to the key already in use would only look like a rotation.
+            let (nonce, probe) = target.seal("rotation-probe", "")?;
+            if current.open("rotation-probe", &nonce, &probe).is_ok() {
+                bail!("the new master key is the same as the current one");
+            }
+            (target.clone(), None)
+        }
+        NewKey::Enveloped(wrapper) => {
+            let (plaintext, wrapped) = wrapper.generate().await?;
+            (SecretBox::from_bytes(&plaintext)?, Some((wrapper.key_id().to_string(), wrapped)))
+        }
+    };
+
+    let mut tx = db.begin().await?;
+    // Readers carry on; a credential saved meanwhile waits, and so cannot
+    // slip in under the old key behind the rotation's back.
+    sqlx::query("LOCK TABLE secrets, master_key IN EXCLUSIVE MODE").execute(&mut *tx).await?;
+    let rows: Vec<(String, Vec<u8>, Vec<u8>)> =
+        sqlx::query_as("SELECT key, nonce, ciphertext FROM secrets ORDER BY key").fetch_all(&mut *tx).await?;
+
+    let mut outcome = Rotated { moved: 0, already: 0 };
+    let mut unreadable = Vec::new();
+    for (key, nonce, ciphertext) in &rows {
+        let Ok(plaintext) = current.open(key, nonce, ciphertext) else {
+            match target.open(key, nonce, ciphertext) {
+                Ok(_) => outcome.already += 1,
+                Err(_) => unreadable.push(key.as_str()),
+            }
+            continue;
+        };
+        let (nonce, ciphertext) = target.seal(key, &plaintext)?;
+        // `updated_at` stays: the credential itself has not changed.
+        sqlx::query("UPDATE secrets SET nonce = $2, ciphertext = $3 WHERE key = $1")
+            .bind(key)
+            .bind(nonce)
+            .bind(ciphertext)
+            .execute(&mut *tx)
+            .await?;
+        outcome.moved += 1;
+    }
+    if !unreadable.is_empty() {
+        bail!(
+            "nothing was changed: the current master key cannot read {} of {} stored credential(s) ({}).              Check that the current key is the one the server runs with; credentials saved under a lost key              have to be removed or entered again first",
+            unreadable.len(),
+            rows.len(),
+            unreadable.join(", ")
+        );
+    }
+
+    sqlx::query("DELETE FROM master_key").execute(&mut *tx).await?;
+    if let Some((key_id, wrapped)) = &wrapped {
+        sqlx::query("INSERT INTO master_key (provider, key_id, wrapped) VALUES ('aws-kms', $1, $2)")
+            .bind(key_id)
+            .bind(wrapped)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(outcome)
+}
+
+/// `rotate-master-key`: resolve both keys from the command line and rotate.
+pub async fn rotate_configured(args: &RotateArgs) -> Result<Rotated> {
+    let db = PgPool::connect(&args.database_url).await.context("could not connect to Postgres (HYPERBEAM_DATABASE_URL)")?;
+
+    // The same secret on both sides means it was given a new value: the key
+    // to move away from is then the version Secrets Manager kept as previous.
+    let in_place = args.current.aws_secret.as_deref().filter(|id| args.new.new_aws_secret.as_deref() == Some(id));
+    let current = match in_place {
+        Some(secret_id) => from_secrets_manager(secret_id, Some("AWSPREVIOUS")).await.with_context(|| {
+            format!("could not read the previous value (AWSPREVIOUS) of {secret_id}: put the new key in the secret before rotating")
+        })?,
+        None => load(&args.current, &db).await.context("could not load the current master key")?,
+    };
+
+    if let Some(key) = &args.new.new_master_key {
+        let new = SecretBox::from_base64(key).context("HYPERBEAM_NEW_MASTER_KEY")?;
+        return rotate(&db, &current, NewKey::Supplied(&new)).await;
+    }
+    if let Some(secret_id) = &args.new.new_aws_secret {
+        let new = from_secrets_manager(secret_id, None)
+            .await
+            .with_context(|| format!("HYPERBEAM_NEW_MASTER_KEY_AWS_SECRET ({secret_id})"))?;
+        return rotate(&db, &current, NewKey::Supplied(&new)).await;
+    }
+    if let Some(key_id) = &args.new.new_aws_kms_key {
+        let kms = AwsKms { client: aws_sdk_kms::Client::new(&aws(key_id).await), key_id: key_id.clone() };
+        return rotate(&db, &current, NewKey::Enveloped(&kms))
+            .await
+            .with_context(|| format!("HYPERBEAM_NEW_MASTER_KEY_AWS_KMS_KEY ({key_id})"));
+    }
+    bail!("no new master key given: set --new-master-key, --new-master-key-aws-secret or --new-master-key-aws-kms-key")
 }
 
 #[cfg(test)]

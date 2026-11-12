@@ -5,7 +5,8 @@
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use hyperbeam_server::masterkey::{KeyWrapper, enveloped};
+use hyperbeam_server::crypto::SecretBox;
+use hyperbeam_server::masterkey::{KeyWrapper, NewKey, Rotated, enveloped, rotate};
 use hyperbeam_server::store;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -95,4 +96,84 @@ async fn an_installation_with_credentials_under_a_direct_key_is_not_rekeyed() {
     assert_eq!(kms.generated.load(Ordering::SeqCst), 0);
     let (rows,): (i64,) = sqlx::query_as("SELECT count(*) FROM master_key").fetch_one(&db).await.unwrap();
     assert_eq!(rows, 0);
+}
+
+fn direct_key() -> SecretBox {
+    SecretBox::from_base64(&SecretBox::generate_key()).unwrap()
+}
+
+#[tokio::test]
+async fn rotating_a_direct_key_moves_every_credential_and_can_be_run_again() {
+    let Some(db) = database().await else { return };
+    let (old, new) = (direct_key(), direct_key());
+    store::put_secret(&db, &old, "integration/github", "ghp_secret").await.unwrap();
+    store::put_secret(&db, &old, "integration/notion", "ntn_secret").await.unwrap();
+
+    assert_eq!(rotate(&db, &old, NewKey::Supplied(&new)).await.unwrap(), Rotated { moved: 2, already: 0 });
+    assert_eq!(store::get_secret(&db, &new, "integration/github").await.unwrap().as_deref(), Some("ghp_secret"));
+    assert_eq!(store::get_secret(&db, &new, "integration/notion").await.unwrap().as_deref(), Some("ntn_secret"));
+    assert!(store::get_secret(&db, &old, "integration/github").await.is_err());
+
+    // Running it again finds the work done rather than failing.
+    assert_eq!(rotate(&db, &old, NewKey::Supplied(&new)).await.unwrap(), Rotated { moved: 0, already: 2 });
+
+    let err = rotate(&db, &new, NewKey::Supplied(&new)).await.expect_err("must fail");
+    assert!(format!("{err:#}").contains("same as the current one"), "{err:#}");
+}
+
+#[tokio::test]
+async fn a_rotation_that_cannot_read_everything_changes_nothing() {
+    let Some(db) = database().await else { return };
+    let (old, stray, new) = (direct_key(), direct_key(), direct_key());
+    store::put_secret(&db, &old, "integration/github", "ghp_secret").await.unwrap();
+    store::put_secret(&db, &stray, "integration/notion", "ntn_secret").await.unwrap();
+
+    let err = rotate(&db, &old, NewKey::Supplied(&new)).await.expect_err("must fail");
+    let message = format!("{err:#}");
+    assert!(message.contains("cannot read 1 of 2") && message.contains("integration/notion"), "{message}");
+    assert_eq!(store::get_secret(&db, &old, "integration/github").await.unwrap().as_deref(), Some("ghp_secret"));
+    assert!(store::get_secret(&db, &new, "integration/github").await.is_err());
+}
+
+#[tokio::test]
+async fn rotation_moves_between_a_direct_key_and_wrapped_ones() {
+    let Some(db) = database().await else { return };
+    let direct = direct_key();
+    store::put_secret(&db, &direct, "integration/github", "ghp_secret").await.unwrap();
+    let wrapped_under = |db: sqlx::PgPool| async move {
+        sqlx::query_as::<_, (String, Vec<u8>)>("SELECT key_id, wrapped FROM master_key").fetch_all(&db).await.unwrap()
+    };
+    let read = |secrets: SecretBox, db: sqlx::PgPool| async move {
+        store::get_secret(&db, &secrets, "integration/github").await.unwrap().unwrap()
+    };
+
+    // Direct → KMS, which a plain start refuses to do.
+    let kms_a = FakeKms::new("kms-a");
+    assert_eq!(rotate(&db, &direct, NewKey::Enveloped(&kms_a)).await.unwrap(), Rotated { moved: 1, already: 0 });
+    let first = wrapped_under(db.clone()).await;
+    assert_eq!(first[0].0, "kms-a");
+    let on_a = enveloped(&db, &kms_a).await.unwrap();
+    assert_eq!(read(on_a.clone(), db.clone()).await, "ghp_secret");
+
+    // A new data key under the same KMS key.
+    rotate(&db, &on_a, NewKey::Enveloped(&kms_a)).await.unwrap();
+    let second = wrapped_under(db.clone()).await;
+    assert_eq!((second.len(), second[0].0.as_str()), (1, "kms-a"));
+    assert_ne!(first[0].1, second[0].1);
+    assert!(store::get_secret(&db, &on_a, "integration/github").await.is_err());
+    let on_a = enveloped(&db, &kms_a).await.unwrap();
+    assert_eq!(read(on_a.clone(), db.clone()).await, "ghp_secret");
+
+    // Onto another KMS key.
+    let kms_b = FakeKms::new("kms-b");
+    rotate(&db, &on_a, NewKey::Enveloped(&kms_b)).await.unwrap();
+    assert!(enveloped(&db, &kms_a).await.is_err());
+    let on_b = enveloped(&db, &kms_b).await.unwrap();
+    assert_eq!(read(on_b.clone(), db.clone()).await, "ghp_secret");
+
+    // And back to a key held directly: nothing wrapped is left behind.
+    let direct = direct_key();
+    rotate(&db, &on_b, NewKey::Supplied(&direct)).await.unwrap();
+    assert!(wrapped_under(db.clone()).await.is_empty());
+    assert_eq!(read(direct, db.clone()).await, "ghp_secret");
 }

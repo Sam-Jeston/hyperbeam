@@ -43,11 +43,10 @@ Every attempt by an agent to act outside its sandbox is recorded: tool calls, gi
 
 ## Stored credentials
 
-Credentials are encrypted at rest with AES-256-GCM under the installation’s master key, each bound to the record it belongs to. The master key can be supplied directly, read from AWS Secrets Manager, or kept encrypted by an AWS KMS key so that it exists unencrypted only in the server’s memory. See [Credentials](/credentials#the-master-key). People’s passwords are hashed with Argon2, and API keys and sign-in tokens are stored only as hashes.
+Credentials are encrypted at rest with AES-256-GCM under the installation’s master key, each bound to the record it belongs to. The master key can be supplied directly, read from AWS Secrets Manager, or kept encrypted by an AWS KMS key so that it exists unencrypted only in the server’s memory, and it can be [rotated](/credentials#rotating-the-master-key). See [Credentials](/credentials#the-master-key). People’s passwords are hashed with Argon2, and API keys and sign-in tokens are stored only as hashes.
 
 ## Known limits
 
 - One team per installation, and the control plane runs as a single replica.
 - Sign-in is email and password only; there is no OIDC yet.
 - Notion and connections use a key rather than an OAuth flow, so agents act as that key’s user. Servers that sign in only with OAuth can’t be connected yet.
-- The master key can’t be rotated yet.

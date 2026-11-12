@@ -34,7 +34,7 @@ export HYPERBEAM_MASTER_KEY=$(./target/release/hyperbeam-server gen-key)
 ```
 
 > [!WARNING]
-> Keep the master key. It encrypts every stored credential, and if it changes, the credentials stored with the old one can no longer be read. See [Credentials](/credentials#the-master-key).
+> Keep the master key. It encrypts every stored credential, and if you change the setting, the credentials stored with the old one can no longer be read. To change the key, [rotate it](/credentials#rotating-the-master-key).
 
 Open <http://localhost:8080>. The first person in creates the team and owns it.
 

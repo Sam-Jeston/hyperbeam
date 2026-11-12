@@ -38,7 +38,7 @@ helm install hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --create-name
 The chart stores the master key in a Kubernetes Secret and keeps the existing value on upgrade. To manage the Secret yourself, set `existingSecret` instead of `masterKey`.
 
 > [!IMPORTANT]
-> Back up the master key. It encrypts every stored credential, and Hyperbeam can’t yet rotate it. See [Credentials](/credentials#the-master-key).
+> Back up the master key. It encrypts every stored credential. To change it, see [Rotating the master key](/credentials#rotating-the-master-key): setting a different `masterKey` on its own makes stored credentials unreadable.
 
 ### Keep the master key in AWS
 
