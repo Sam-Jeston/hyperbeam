@@ -1,0 +1,72 @@
+#!/bin/bash
+# Runs once, on first boot: mounts the data volume, installs k3s, and
+# publishes the kubeconfig. Progress is in /var/log/cloud-init-output.log.
+set -euxo pipefail
+
+# --- Data volume ---
+# k3s's local-path provisioner keeps every persistent volume under this
+# directory, so Postgres data and the TLS certificate live on the data volume.
+device=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${data_volume}
+storage=/var/lib/rancher/k3s/storage
+
+for _ in $(seq 1 120); do
+  [ -e "$device" ] && break
+  sleep 5
+done
+[ -e "$device" ] || { echo "data volume never attached" >&2; exit 1; }
+
+blkid "$device" || mkfs.ext4 -L hyperbeam-data "$device"
+mkdir -p "$storage"
+echo "LABEL=hyperbeam-data $storage ext4 defaults,nofail 0 2" >> /etc/fstab
+mount "$storage"
+
+# --- Pull images from ECR with the instance role ---
+mkdir -p /var/lib/rancher/credentialprovider/bin
+curl -fsSL -o /var/lib/rancher/credentialprovider/bin/ecr-credential-provider \
+  "https://artifacts.k8s.io/binaries/cloud-provider-aws/v1.31.0/linux/${arch}/ecr-credential-provider-linux-${arch}"
+chmod 755 /var/lib/rancher/credentialprovider/bin/ecr-credential-provider
+cat > /var/lib/rancher/credentialprovider/config.yaml <<'EOF'
+apiVersion: kubelet.config.k8s.io/v1
+kind: CredentialProviderConfig
+providers:
+  - name: ecr-credential-provider
+    apiVersion: credentialprovider.kubelet.k8s.io/v1
+    matchImages:
+      - "*.dkr.ecr.*.amazonaws.com"
+    defaultCacheDuration: 12h
+EOF
+
+# --- TLS: k3s's bundled Traefik gets certificates from Let's Encrypt ---
+mkdir -p /var/lib/rancher/k3s/server/manifests
+cat > /var/lib/rancher/k3s/server/manifests/traefik-config.yaml <<'EOF'
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    persistence:
+      enabled: true
+    additionalArguments:
+      - --certificatesresolvers.letsencrypt.acme.email=${acme_email}
+      - --certificatesresolvers.letsencrypt.acme.storage=/data/acme.json
+      - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+      - --entrypoints.web.http.redirections.entrypoint.to=:443
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+EOF
+
+# --- k3s ---
+# A fixed node name keeps persistent volumes bound across a hostname change.
+curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL="${k3s_channel}" sh -s - server \
+  --node-name hyperbeam \
+  --write-kubeconfig-mode 600
+
+until k3s kubectl get node hyperbeam >/dev/null 2>&1; do sleep 5; done
+
+# --- Publish the kubeconfig ---
+# It points at https://127.0.0.1:6443, which is where an SSM port forward
+# puts the API on your machine.
+snap install aws-cli --classic
+/snap/bin/aws ssm put-parameter --region "${region}" --name "${kubeconfig_name}" \
+  --type SecureString --overwrite --value file:///etc/rancher/k3s/k3s.yaml

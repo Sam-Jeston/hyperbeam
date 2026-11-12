@@ -166,4 +166,5 @@ kind delete cluster --name hyperbeam
 ## Next steps
 
 - [Install on Kubernetes](/install-kubernetes): the same chart on a shared cluster, with a registry and an ingress.
+- [Install on AWS](/install-aws): a Terraform module that runs it on one EC2 instance.
 - [Configuration](/configuration): every server setting, and the chart values that set them.

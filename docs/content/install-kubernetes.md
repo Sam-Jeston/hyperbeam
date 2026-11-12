@@ -5,7 +5,7 @@ description: Build the images, install the Helm chart, and point the harness pro
 
 The Helm chart in `deploy/helm/hyperbeam` installs the control plane, an optional Postgres, and a locked-down namespace for agent sandboxes.
 
-To try the chart on your own machine first, without a registry, see [Run in a local cluster](/local-cluster).
+To try the chart on your own machine first, without a registry, see [Run in a local cluster](/local-cluster). For a ready-made cluster on one EC2 instance, see [Install on AWS](/install-aws).
 
 ## Before you start
 

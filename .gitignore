@@ -7,3 +7,12 @@ node_modules
 /site/dist
 /docs/dist
 hyperbeam-master-key
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+hyperbeam-kubeconfig
+hyperbeam-values.yaml
