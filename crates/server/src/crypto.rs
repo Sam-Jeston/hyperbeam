@@ -51,10 +51,14 @@ impl SecretBox {
             .decode(key.trim())
             .or_else(|_| URL_SAFE_NO_PAD.decode(key.trim()))
             .context("the master key is not valid base64")?;
-        if bytes.len() != 32 {
-            bail!("the master key must decode to 32 bytes, got {}", bytes.len());
+        Self::from_bytes(&bytes)
+    }
+
+    pub fn from_bytes(key: &[u8]) -> Result<Self> {
+        if key.len() != 32 {
+            bail!("the master key must be 32 bytes, got {}", key.len());
         }
-        Ok(Self { cipher: Aes256Gcm::new_from_slice(&bytes).map_err(|e| anyhow!("{e}"))? })
+        Ok(Self { cipher: Aes256Gcm::new_from_slice(key).map_err(|e| anyhow!("{e}"))? })
     }
 
     pub fn generate_key() -> String {

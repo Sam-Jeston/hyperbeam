@@ -250,6 +250,7 @@ hyperbeam stop 3ff6c49b
 |---|---|
 | `HYPERBEAM_DATABASE_URL` | Postgres connection URL |
 | `HYPERBEAM_MASTER_KEY` | 32 random bytes, base64; encrypts stored credentials |
+| `HYPERBEAM_MASTER_KEY_AWS_SECRET` / `HYPERBEAM_MASTER_KEY_AWS_KMS_KEY` | instead of the above: read the master key from AWS Secrets Manager, or keep it wrapped under an AWS KMS key |
 | `HYPERBEAM_PUBLIC_URL` | where people reach the UI |
 | `HYPERBEAM_INTERNAL_URL` | where sandboxes reach the server |
 | `HYPERBEAM_SANDBOX_DRIVER` | `process` (development) or `kubernetes` |

@@ -1,3 +1,4 @@
+{{- $_ := include "hyperbeam.externalMasterKey" . }}
 {{- $name := include "hyperbeam.name" . }}
 {{- $tag := .Values.image.tag | default .Chart.AppVersion }}
 apiVersion: v1
@@ -5,6 +6,9 @@ kind: ServiceAccount
 metadata:
   name: {{ $name }}
   labels: {{- include "hyperbeam.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -55,9 +59,21 @@ spec:
             - name: HYPERBEAM_DATABASE_URL
               valueFrom:
                 secretKeyRef: { name: {{ include "hyperbeam.secretName" . }}, key: database-url }
+            {{- if .Values.aws.masterKeySecret }}
+            - name: HYPERBEAM_MASTER_KEY_AWS_SECRET
+              value: {{ .Values.aws.masterKeySecret | quote }}
+            {{- else if .Values.aws.kmsKeyId }}
+            - name: HYPERBEAM_MASTER_KEY_AWS_KMS_KEY
+              value: {{ .Values.aws.kmsKeyId | quote }}
+            {{- else }}
             - name: HYPERBEAM_MASTER_KEY
               valueFrom:
                 secretKeyRef: { name: {{ include "hyperbeam.secretName" . }}, key: master-key }
+            {{- end }}
+            {{- if .Values.aws.region }}
+            - name: AWS_REGION
+              value: {{ .Values.aws.region | quote }}
+            {{- end }}
             - name: HYPERBEAM_LISTEN
               value: "0.0.0.0:8080"
             - name: HYPERBEAM_PUBLIC_URL

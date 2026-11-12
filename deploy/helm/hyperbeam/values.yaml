@@ -13,6 +13,24 @@ publicUrl: http://localhost:8080
 masterKey: ""
 existingSecret: ""
 
+# Keep the master key in AWS instead of setting masterKey. Set one of the two.
+# The server needs AWS credentials: on EKS, annotate its service account with
+# an IAM role (serviceAccount.annotations) or use Pod Identity.
+aws:
+  # Name or ARN of a Secrets Manager secret holding the key (the base64 text,
+  # or JSON with it under `master_key`). Needs secretsmanager:GetSecretValue.
+  masterKeySecret: ""
+  # ID, alias or ARN of a KMS key. The master key is generated on first start
+  # and stored in Postgres wrapped under it, so there is no key to hand over or
+  # back up. Needs kms:GenerateDataKey and kms:Decrypt.
+  kmsKeyId: ""
+  # Only needed when the above is not an ARN and the pod has no AWS_REGION.
+  region: ""
+
+serviceAccount:
+  # e.g. eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/hyperbeam
+  annotations: {}
+
 database:
   # Connection URL of an external Postgres. Leave empty to use the bundled one.
   url: ""

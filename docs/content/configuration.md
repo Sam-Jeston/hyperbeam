@@ -10,10 +10,14 @@ The server is configured with environment variables, or the matching command-lin
 | Variable | Default | Meaning |
 |---|---|---|
 | `HYPERBEAM_DATABASE_URL` | none (required) | Postgres connection URL. |
-| `HYPERBEAM_MASTER_KEY` | none (required) | 32 random bytes, base64. Encrypts stored credentials. See [Credentials](/credentials#the-master-key). |
+| `HYPERBEAM_MASTER_KEY` | none | The master key itself: 32 random bytes, base64. Encrypts stored credentials. |
+| `HYPERBEAM_MASTER_KEY_AWS_SECRET` | none | Name or ARN of an AWS Secrets Manager secret that holds the master key. |
+| `HYPERBEAM_MASTER_KEY_AWS_KMS_KEY` | none | ID, alias or ARN of an AWS KMS key. The master key is generated on first start and stored in Postgres, encrypted by this key. |
 | `HYPERBEAM_LISTEN` | `0.0.0.0:8080` | Address the server listens on. |
 | `HYPERBEAM_PUBLIC_URL` | `http://localhost:8080` | Where people reach the UI. Used in invite links. |
 | `HYPERBEAM_INTERNAL_URL` | `http://127.0.0.1:8080` | Where sandboxes reach the server. |
+
+Exactly one of the three master key settings is required. See [Credentials](/credentials#the-master-key).
 
 ## Sandboxes
 

@@ -43,7 +43,7 @@ Every attempt by an agent to act outside its sandbox is recorded: tool calls, gi
 
 ## Stored credentials
 
-Credentials are encrypted at rest with AES-256-GCM under the installation’s master key, each bound to the record it belongs to. People’s passwords are hashed with Argon2, and API keys and sign-in tokens are stored only as hashes.
+Credentials are encrypted at rest with AES-256-GCM under the installation’s master key, each bound to the record it belongs to. The master key can be supplied directly, read from AWS Secrets Manager, or kept encrypted by an AWS KMS key so that it exists unencrypted only in the server’s memory. See [Credentials](/credentials#the-master-key). People’s passwords are hashed with Argon2, and API keys and sign-in tokens are stored only as hashes.
 
 ## Known limits
 

@@ -43,6 +43,9 @@ kube = { version = "1", default-features = false, features = ["client", "rustls-
 k8s-openapi = { version = "0.25", features = ["v1_31"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 mime_guess = "2"
+aws-config = { version = "1", default-features = false, features = ["rt-tokio", "default-https-client", "credentials-process", "sso"] }
+aws-sdk-kms = { version = "1", default-features = false, features = ["rt-tokio", "default-https-client"] }
+aws-sdk-secretsmanager = { version = "1", default-features = false, features = ["rt-tokio", "default-https-client"] }
 
 [dev-dependencies]
 clap.workspace = true

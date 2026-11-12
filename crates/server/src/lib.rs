@@ -12,6 +12,7 @@ pub mod gateway;
 pub mod gitproxy;
 pub mod hub;
 pub mod integrations;
+pub mod masterkey;
 pub mod probe;
 pub mod sandbox;
 pub mod sessions;
@@ -28,7 +29,11 @@ use std::sync::Arc;
 
 /// Connect to the database, migrate, and assemble the application.
 pub async fn build(cfg: Config) -> Result<(App, Router)> {
-    let secrets = crypto::SecretBox::from_base64(&cfg.master_key).context("HYPERBEAM_MASTER_KEY")?;
+    // A key given directly is checked before anything else, so a typo fails
+    // at once rather than after the wait for Postgres.
+    if let Some(key) = &cfg.master_key.master_key {
+        crypto::SecretBox::from_base64(key).context("HYPERBEAM_MASTER_KEY")?;
+    }
     // The database often starts alongside the server (same Helm release,
     // same compose file); wait for it rather than crash-looping.
     let options = PgPoolOptions::new().max_connections(20).acquire_timeout(std::time::Duration::from_secs(10));
@@ -44,6 +49,7 @@ pub async fn build(cfg: Config) -> Result<(App, Router)> {
         }
     };
     sqlx::migrate!("./migrations").run(&db).await.context("database migration failed")?;
+    let secrets = masterkey::load(&cfg.master_key, &db).await.context("could not load the master key")?;
     store::seed_harnesses(&db).await?;
 
     let driver: Arc<dyn sandbox::SandboxDriver> = match cfg.sandbox_driver {

@@ -59,7 +59,7 @@ impl SandboxDriver for ProcessDriver {
         let log = std::fs::File::create(dir.join("runner.log"))?;
 
         // The child must not inherit the server's environment: it holds the
-        // master key and the database URL.
+        // database URL, and the master key or the AWS credentials that reach it.
         let child = Command::new(&self.runner_bin)
             .arg("run")
             .env_clear()

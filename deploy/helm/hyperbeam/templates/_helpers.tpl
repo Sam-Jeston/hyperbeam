@@ -22,3 +22,14 @@ app.kubernetes.io/component: server
 {{- define "hyperbeam.serviceHost" -}}
 {{ include "hyperbeam.name" . }}.{{ .Release.Namespace }}.svc.cluster.local
 {{- end -}}
+
+{{/* Non-empty when the master key lives in AWS rather than in the Secret. */}}
+{{- define "hyperbeam.externalMasterKey" -}}
+{{- if and .Values.aws.masterKeySecret .Values.aws.kmsKeyId -}}
+{{- fail "set only one of aws.masterKeySecret and aws.kmsKeyId" -}}
+{{- end -}}
+{{- if and .Values.masterKey (or .Values.aws.masterKeySecret .Values.aws.kmsKeyId) -}}
+{{- fail "set only one of masterKey, aws.masterKeySecret and aws.kmsKeyId" -}}
+{{- end -}}
+{{- if or .Values.aws.masterKeySecret .Values.aws.kmsKeyId -}}true{{- end -}}
+{{- end -}}

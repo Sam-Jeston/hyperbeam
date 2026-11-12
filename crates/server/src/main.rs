@@ -13,7 +13,7 @@ struct Cli {
 enum Command {
     /// Run the control plane.
     Serve(Box<Config>),
-    /// Print a new master key for HYPERBEAM_MASTER_KEY.
+    /// Print a new master key, for HYPERBEAM_MASTER_KEY or to store in AWS Secrets Manager.
     GenKey,
 }
 

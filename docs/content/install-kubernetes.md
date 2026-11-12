@@ -40,6 +40,26 @@ The chart stores the master key in a Kubernetes Secret and keeps the existing va
 > [!IMPORTANT]
 > Back up the master key. It encrypts every stored credential, and Hyperbeam can’t yet rotate it. See [Credentials](/credentials#the-master-key).
 
+### Keep the master key in AWS
+
+On AWS, the master key can stay out of the cluster. Set one of these instead of `masterKey`:
+
+```bash
+# The key is generated on first start and stored in Postgres, encrypted by a KMS key.
+  --set aws.kmsKeyId=arn:aws:kms:eu-west-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab \
+
+# Or: the key is read from a Secrets Manager secret you created.
+  --set aws.masterKeySecret=hyperbeam/master-key \
+```
+
+The server needs an IAM role that allows `kms:GenerateDataKey` and `kms:Decrypt` on the KMS key, or `secretsmanager:GetSecretValue` on the secret. On EKS, give it one with IAM roles for service accounts:
+
+```bash
+  --set 'serviceAccount.annotations.eks\.amazonaws\.com/role-arn=arn:aws:iam::111122223333:role/hyperbeam'
+```
+
+or with a Pod Identity association for the `hyperbeam` service account. Set `aws.region` if you name the key or secret by anything other than its ARN and the pod has no `AWS_REGION`. [Credentials](/credentials#the-master-key) explains both options.
+
 Then open the UI, create the team, and under **Settings → Harnesses** set each harness profile’s image to the one you pushed. Continue with [Set up a team](/team-setup).
 
 ## What the chart creates

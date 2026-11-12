@@ -33,7 +33,57 @@ A harness credential is delivered to the sandbox of a session that needs it, as 
 
 ## The master key
 
-The master key is 32 random bytes, base64-encoded, set with `HYPERBEAM_MASTER_KEY`. Generate one with `hyperbeam-server gen-key` or `openssl rand -base64 32`. The Helm chart keeps it in a Kubernetes Secret.
+The master key is 32 random bytes that encrypt every stored credential. Hyperbeam can get it from one of three places. Set exactly one.
+
+| Source | Setting | Where the key lives |
+|---|---|---|
+| Given directly | `HYPERBEAM_MASTER_KEY` | In the server’s environment. The Helm chart keeps it in a Kubernetes Secret. |
+| AWS Secrets Manager | `HYPERBEAM_MASTER_KEY_AWS_SECRET` | In a secret you create. The server reads it at start. |
+| AWS KMS | `HYPERBEAM_MASTER_KEY_AWS_KMS_KEY` | In Postgres, encrypted by a KMS key. The server generates it on first start. |
+
+### Given directly
+
+Generate a key with `hyperbeam-server gen-key` or `openssl rand -base64 32`, and set it as `HYPERBEAM_MASTER_KEY`.
+
+### AWS Secrets Manager
+
+Store a generated key in a secret, and give the server the secret’s name or ARN:
+
+```bash
+aws secretsmanager create-secret --name hyperbeam/master-key \
+  --secret-string "$(openssl rand -base64 32)"
+
+export HYPERBEAM_MASTER_KEY_AWS_SECRET=hyperbeam/master-key
+```
+
+The secret’s value can be the base64 key as plain text, a JSON object with the key under `master_key`, or the 32 raw bytes as a binary secret. The server needs `secretsmanager:GetSecretValue` on the secret, and `kms:Decrypt` if the secret uses a customer managed key.
+
+The server reads the secret once, when it starts. To move an installation that was given its key directly, store that same key in the secret.
+
+### AWS KMS
+
+Give the server the ID, alias or ARN of a symmetric KMS key:
+
+```bash
+export HYPERBEAM_MASTER_KEY_AWS_KMS_KEY=alias/hyperbeam
+```
+
+On first start the server asks KMS for a new data key and stores it in Postgres, encrypted by your KMS key. On each later start it asks KMS to decrypt the stored key. The unencrypted master key exists only in the server’s memory, so there is no key to hand over or back up separately: a database backup and the KMS key are enough to restore.
+
+The server needs `kms:GenerateDataKey` and `kms:Decrypt` on the key. Both calls carry the encryption context `hyperbeam=master-key`, which you can require in the key policy and which appears in CloudTrail.
+
+> [!WARNING]
+> Scheduling the KMS key for deletion makes every stored credential unreadable. Rotating its key material in KMS is safe.
+
+An installation that already holds credentials under a directly supplied key can’t switch to KMS: the server refuses to start rather than generate a key that can’t read them. Use Secrets Manager for such an installation, or enter the credentials again.
+
+### AWS credentials and region
+
+The server finds AWS credentials the way the AWS SDKs do: environment variables, EKS IAM roles for service accounts or Pod Identity, an instance profile, or a shared profile. The region comes from the ARN if you gave one, and from `AWS_REGION` otherwise.
+
+With the Helm chart, set `aws.masterKeySecret` or `aws.kmsKeyId` instead of `masterKey`. See [Install on Kubernetes](/install-kubernetes#keep-the-master-key-in-aws).
+
+### Backups and rotation
 
 > [!IMPORTANT]
-> Back the master key up, and don’t change it. Hyperbeam can’t yet rotate it: credentials stored under one key can’t be read with another, and would have to be entered again.
+> Back up a master key you supply yourself, and don’t change it. Hyperbeam can’t yet rotate the master key: credentials stored under one key can’t be read with another, and would have to be entered again.

@@ -9,14 +9,32 @@ pub enum DriverKind {
     Kubernetes,
 }
 
+/// Where the master key, which encrypts stored credentials, comes from.
+/// Exactly one source must be given.
+#[derive(Debug, Clone, Default, Args)]
+#[group(id = "master_key_source", required = true, multiple = false)]
+pub struct MasterKeyArgs {
+    /// The key itself: 32 random bytes, base64. See `gen-key`.
+    #[arg(long, env = "HYPERBEAM_MASTER_KEY", hide_env_values = true)]
+    pub master_key: Option<String>,
+
+    /// Name or ARN of an AWS Secrets Manager secret that holds the key.
+    #[arg(long = "master-key-aws-secret", env = "HYPERBEAM_MASTER_KEY_AWS_SECRET")]
+    pub aws_secret: Option<String>,
+
+    /// ID, alias or ARN of an AWS KMS key. The master key is generated on
+    /// first start and stored in the database wrapped under this key.
+    #[arg(long = "master-key-aws-kms-key", env = "HYPERBEAM_MASTER_KEY_AWS_KMS_KEY")]
+    pub aws_kms_key: Option<String>,
+}
+
 #[derive(Debug, Clone, Args)]
 pub struct Config {
     #[arg(long, env = "HYPERBEAM_DATABASE_URL", hide_env_values = true)]
     pub database_url: String,
 
-    /// 32 random bytes, base64. Encrypts stored credentials. See `gen-key`.
-    #[arg(long, env = "HYPERBEAM_MASTER_KEY", hide_env_values = true)]
-    pub master_key: String,
+    #[command(flatten)]
+    pub master_key: MasterKeyArgs,
 
     #[arg(long, env = "HYPERBEAM_LISTEN", default_value = "0.0.0.0:8080")]
     pub listen: String,
