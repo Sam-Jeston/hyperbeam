@@ -1,12 +1,11 @@
 //! The tool gateway: an MCP server (streamable HTTP, JSON responses) that is
-//! the only way an agent can act on GitHub, Notion, the MCP connections an
-//! admin has added, or the platform.
+//! the only way an agent can act on GitHub, the MCP connections an admin has
+//! added (Notion, Linear and the like), or the platform.
 //!
 //! Every call is authenticated by the session's run token, checked against
 //! the session's grants, audited, and shown in the session log.
 
 mod github;
-mod notion;
 mod platform;
 
 use crate::app::App;
@@ -115,7 +114,6 @@ pub fn arg_list(args: &Value, name: &str) -> Vec<String> {
 fn catalog() -> Vec<ToolDef> {
     let mut tools = platform::tools();
     tools.extend(github::tools());
-    tools.extend(notion::tools());
     tools
 }
 
@@ -149,7 +147,7 @@ async fn visible_tools(app: &App, session: &Session) -> Vec<Value> {
             // What the admin cleared is what the agent sees, even if the
             // server has started describing the tool differently since.
             let mut listed = json!({
-                "name": format!("{}_{}", conn.name, tool.name),
+                "name": format!("{}_{}", conn.name, conn.short_name(&tool.name)),
                 "description": format!("[{}] {}", conn.title, tool.description),
                 "inputSchema": tool.input_schema,
             });
@@ -172,7 +170,7 @@ async fn connection_for(app: &App, name: &str) -> Result<Option<(Connection, Str
 }
 
 async fn call_connection(app: &App, session: &Session, conn: &Connection, tool_name: &str, args: &Value) -> ToolResult {
-    let Some(tool) = conn.tools.iter().find(|t| t.name == tool_name) else {
+    let Some(tool) = conn.tools.iter().find(|t| conn.short_name(&t.name) == tool_name) else {
         return Err(ToolError::Failed(format!("{} has no tool named `{tool_name}`", conn.title)));
     };
     let (level, _) = conn.level_of(tool);
@@ -187,15 +185,22 @@ async fn call_connection(app: &App, session: &Session, conn: &Connection, tool_n
             if level == ToolLevel::Read { conn.read_label() } else { conn.write_label() },
         )));
     }
-    let full = conn.endpoint(app).await?;
+    let args = if args.is_object() { args.clone() } else { json!({}) };
     // Read tools go through the vendor's read-only variant where there is
     // one, so the vendor enforces the split as well.
-    let endpoint = match (level, conn.preset()) {
-        (ToolLevel::Read, Some(preset)) if tool.read_only_variant => preset.read_only(&full).unwrap_or(full),
-        _ => full,
+    let variant = |full: &connections::client::Endpoint| match (level, conn.preset()) {
+        (ToolLevel::Read, Some(preset)) if tool.read_only_variant => preset.read_only(full).unwrap_or_else(|| full.clone()),
+        _ => full.clone(),
     };
-    let args = if args.is_object() { args.clone() } else { json!({}) };
-    let result = app.mcp.call_tool(&app.http, &endpoint, tool_name, &args).await?;
+    let full = conn.endpoint(app).await?;
+    let result = match app.mcp.call_tool(&app.http, &variant(&full), &tool.name, &args).await {
+        Ok(result) => result,
+        // A token from an OAuth sign-in can lapse early; renew it and retry once.
+        Err(err) => match app.renewed(conn, &full, &err).await? {
+            Some(fresh) => app.mcp.call_tool(&app.http, &variant(&fresh), &tool.name, &args).await?,
+            None => return Err(err.into()),
+        },
+    };
     let target = aimed_at(&args);
     let text = result
         .get("content")
@@ -237,7 +242,6 @@ async fn call_tool(app: &App, session: &Session, name: &str, args: &Value) -> To
     }
     match name.split('_').next() {
         Some("github") => github::call(app, session, name, args).await,
-        Some("notion") => notion::call(app, session, name, args).await,
         _ => platform::call(app, session, name, args).await,
     }
 }
@@ -292,7 +296,7 @@ pub async fn handle(State(app): State<App>, parts: Parts, Json(request): Json<Va
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false } },
                     "serverInfo": { "name": "hyperbeam", "title": "Hyperbeam", "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": "Tools for acting on GitHub, Notion, the team's other connected services, and the Hyperbeam platform. \
+                    "instructions": "Tools for acting on GitHub, the team's connected services, and the Hyperbeam platform. \
                                      A connected service's tools are named after it, e.g. `sentry_search_issues`. \
                                      Calls are checked against this session's permissions and are visible to the team.",
                 }),

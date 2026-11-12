@@ -43,7 +43,7 @@ A **grant** is one thing an agent may do outside its sandbox, such as `github:op
 
 ## The control plane
 
-Everything an agent does outside its sandbox goes through the **control plane**: the tool gateway for GitHub, Notion and connected MCP servers, the git proxy for clone and push, and the egress proxy for everything else on the network. Each request is checked against the session’s grants and recorded in the audit log. See [Security model](/security).
+Everything an agent does outside its sandbox goes through the **control plane**: the tool gateway for GitHub and connected MCP servers, the git proxy for clone and push, and the egress proxy for everything else on the network. Each request is checked against the session’s grants and recorded in the audit log. See [Security model](/security).
 
 ## What the team teaches its agents
 

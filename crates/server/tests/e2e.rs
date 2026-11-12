@@ -166,20 +166,110 @@ async fn git_backend(
 
 // -------------------------------------------------------- fake MCP servers
 
-/// Two upstream MCP servers: a custom one (JSON replies, an API-key header,
-/// tools listed over two pages) and a stand-in for Linear's hosted server
-/// (event-stream replies, a session id, and a read-only variant).
+/// Three upstream MCP servers: a custom one (JSON replies, an API-key header,
+/// tools listed over two pages), a stand-in for Linear's hosted server
+/// (event-stream replies, a session id, and a read-only variant), and a
+/// stand-in for Notion's, which signs in with OAuth.
 #[derive(Clone, Default)]
 struct FakeMcp {
+    oauth: Arc<Mutex<FakeOauth>>,
     /// Tool calls that arrived: (server, tool, arguments).
     calls: Arc<Mutex<Vec<(String, String, Value)>>>,
     /// The custom server has quietly changed what `search` says it does.
     reworded: Arc<AtomicBool>,
 }
 
+/// The OAuth side of the Notion stand-in: an authorization server at a path
+/// (`/notion-auth`) that registers clients itself and rotates refresh tokens.
+#[derive(Default)]
+struct FakeOauth {
+    /// This server's own address.
+    base: String,
+    /// The PKCE challenge the last sign-in started with.
+    challenge: String,
+    /// Tokens are `at-<n>` and `rt-<n>`; only the latest pair is good.
+    issued: u32,
+    /// Refreshes performed.
+    refreshes: u32,
+    /// Whether the latest access token has been revoked early.
+    revoked: bool,
+}
+
+async fn notion_resource_metadata(State(mcp): State<FakeMcp>) -> Response {
+    let base = mcp.oauth.lock().unwrap().base.clone();
+    axum::Json(json!({ "resource": format!("{base}/notion/mcp"), "authorization_servers": [format!("{base}/notion-auth")], "scopes_supported": ["ignored"] })).into_response()
+}
+
+async fn notion_server_metadata(State(mcp): State<FakeMcp>) -> Response {
+    let base = mcp.oauth.lock().unwrap().base.clone();
+    axum::Json(json!({
+        "issuer": format!("{base}/notion-auth"),
+        "authorization_endpoint": format!("{base}/notion-auth/authorize"),
+        "token_endpoint": format!("{base}/notion-auth/token"),
+        "registration_endpoint": format!("{base}/notion-auth/register"),
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none", "client_secret_basic"],
+    }))
+    .into_response()
+}
+
+async fn notion_register(axum::Json(body): axum::Json<Value>) -> Response {
+    assert!(body["redirect_uris"][0].as_str().unwrap().ends_with("/api/v1/oauth/callback"), "{body}");
+    assert_eq!(body["token_endpoint_auth_method"], "none");
+    (StatusCode::CREATED, axum::Json(json!({ "client_id": "registered-client", "token_endpoint_auth_method": "none" }))).into_response()
+}
+
+/// Consent is assumed: straight back to the redirect URL with a code.
+async fn notion_authorize(State(mcp): State<FakeMcp>, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Response {
+    let mut oauth = mcp.oauth.lock().unwrap();
+    assert_eq!(q["response_type"], "code");
+    assert_eq!(q["client_id"], "registered-client");
+    assert_eq!(q["code_challenge_method"], "S256");
+    assert_eq!(q["scope"], "default");
+    assert_eq!(q["resource"], format!("{}/notion/mcp", oauth.base));
+    oauth.challenge = q["code_challenge"].clone();
+    let location = format!("{}?code=code-1&state={}", q["redirect_uri"], q["state"]);
+    Response::builder().status(StatusCode::FOUND).header("location", location).body(axum::body::Body::empty()).unwrap()
+}
+
+async fn notion_token(State(mcp): State<FakeMcp>, body: String) -> Response {
+    use sha2::Digest;
+    let form: std::collections::HashMap<String, String> = url::form_urlencoded::parse(body.as_bytes()).into_owned().collect();
+    let mut oauth = mcp.oauth.lock().unwrap();
+    let refuse = |why: &str| (StatusCode::BAD_REQUEST, axum::Json(json!({ "error": "invalid_grant", "error_description": why }))).into_response();
+    if form.get("client_id").map(String::as_str) != Some("registered-client") || form.get("resource") != Some(&format!("{}/notion/mcp", oauth.base)) {
+        return refuse("wrong client or resource");
+    }
+    match form["grant_type"].as_str() {
+        "authorization_code" => {
+            let verifier = form.get("code_verifier").cloned().unwrap_or_default();
+            let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()));
+            if form["code"] != "code-1" || challenge != oauth.challenge || !form["redirect_uri"].ends_with("/api/v1/oauth/callback") {
+                return refuse("bad code or verifier");
+            }
+        }
+        "refresh_token" => {
+            if form["refresh_token"] != format!("rt-{}", oauth.issued) {
+                return refuse("refresh token already used");
+            }
+            oauth.refreshes += 1;
+        }
+        _ => return refuse("unsupported grant"),
+    }
+    oauth.issued += 1;
+    oauth.revoked = false;
+    axum::Json(json!({ "access_token": format!("at-{}", oauth.issued), "refresh_token": format!("rt-{}", oauth.issued), "token_type": "bearer", "expires_in": 3600 })).into_response()
+}
+
 impl FakeMcp {
     fn router(self) -> Router {
         Router::new()
+            .route("/notion/mcp", post(|s: State<FakeMcp>, h: HeaderMap, b: axum::Json<Value>| async move { s.0.serve("notion", &h, b.0) }))
+            .route("/.well-known/oauth-protected-resource/notion/mcp", get(notion_resource_metadata))
+            .route("/.well-known/oauth-authorization-server/notion-auth", get(notion_server_metadata))
+            .route("/notion-auth/register", post(notion_register))
+            .route("/notion-auth/authorize", get(notion_authorize))
+            .route("/notion-auth/token", post(notion_token))
             .route("/custom/mcp", post(|s: State<FakeMcp>, h: HeaderMap, b: axum::Json<Value>| async move { s.0.serve("custom", &h, b.0) }))
             .route("/linear/mcp", post(|s: State<FakeMcp>, h: HeaderMap, b: axum::Json<Value>| async move { s.0.serve("linear", &h, b.0) }))
             .route("/linear/mcp/readonly", post(|s: State<FakeMcp>, h: HeaderMap, b: axum::Json<Value>| async move { s.0.serve("linear-readonly", &h, b.0) }))
@@ -194,6 +284,11 @@ impl FakeMcp {
                 "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } } },
             }] }),
             ("custom", Some(_)) => json!({ "tools": [{ "name": "delete_everything", "description": "Delete every record", "inputSchema": { "type": "object" } }] }),
+            ("notion", _) => json!({ "tools": [
+                { "name": "notion-search", "description": "Search the workspace", "inputSchema": { "type": "object" } },
+                { "name": "notion-create-pages", "description": "Create pages", "inputSchema": { "type": "object" } },
+                { "name": "notion-summon", "description": "Something new", "inputSchema": { "type": "object" } },
+            ] }),
             ("linear", _) => json!({ "tools": [
                 { "name": "list_issues", "description": "List issues", "inputSchema": { "type": "object" } },
                 { "name": "create_issue", "description": "Create an issue", "inputSchema": { "type": "object" } },
@@ -205,10 +300,16 @@ impl FakeMcp {
     fn serve(&self, server: &str, headers: &HeaderMap, message: Value) -> Response {
         let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
         let custom = server == "custom";
-        let credential_ok = if custom { header("x-api-key") == "k-custom" } else { header("authorization") == "Bearer lin_api_test" };
-        if !credential_ok {
+        if server == "notion" {
+            let oauth = self.oauth.lock().unwrap();
+            if oauth.issued == 0 || oauth.revoked || header("authorization") != format!("Bearer at-{}", oauth.issued) {
+                let challenge = format!(r#"Bearer resource_metadata="{}/.well-known/oauth-protected-resource/notion/mcp", scope="default""#, oauth.base);
+                return Response::builder().status(StatusCode::UNAUTHORIZED).header("www-authenticate", challenge).body(axum::body::Body::empty()).unwrap();
+            }
+        } else if !(if custom { header("x-api-key") == "k-custom" } else { header("authorization") == "Bearer lin_api_test" }) {
             return StatusCode::UNAUTHORIZED.into_response();
         }
+        let custom = custom || server == "notion";
         let Some(id) = message.get("id").cloned() else { return StatusCode::ACCEPTED.into_response() };
         let method = message["method"].as_str().unwrap_or_default();
         if !custom && method != "initialize" && header("mcp-session-id") != "lin-session" {
@@ -331,6 +432,7 @@ impl Harness {
         let mcp = FakeMcp::default();
         let mcp_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mcp_base = format!("http://{}", mcp_listener.local_addr().unwrap());
+        mcp.oauth.lock().unwrap().base = mcp_base.clone();
         tokio::spawn(axum::serve(mcp_listener, mcp.clone().router()).into_future());
 
         let bin_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
@@ -357,7 +459,7 @@ impl Harness {
             "--github-git-url", &format!("http://{gh_addr}/git"),
             "--egress-addr", &egress_addr,
             "--egress-allow", "allowed.invalid",
-            "--preset-urls", &format!("linear={mcp_base}/linear/mcp"),
+            "--preset-urls", &format!("linear={mcp_base}/linear/mcp,notion={mcp_base}/notion/mcp"),
         ])
         .cfg;
         let (app, router) = hyperbeam_server::build(cfg).await.expect("server builds");
@@ -572,7 +674,7 @@ async fn only_people_who_could_have_launched_an_agent_may_direct_it() {
 
     // Members cannot change the team or its configuration.
     assert_eq!(mia.call(Method::POST, "/invites", Some(json!({ "email": "x@example.com" }))).await.0, StatusCode::FORBIDDEN);
-    assert_eq!(mia.call(Method::PUT, "/integrations/notion", Some(json!({ "secret": "k" }))).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(mia.call(Method::PUT, "/integrations/github", Some(json!({ "secret": "k" }))).await.0, StatusCode::FORBIDDEN);
     assert_eq!(mia.call(Method::POST, "/connections", Some(json!({ "preset": "linear", "secret": "k" }))).await.0, StatusCode::FORBIDDEN);
     // Setup cannot be replayed.
     let again = h.http.post(format!("{}/api/v1/setup", h.base)).json(&json!({ "team_name": "X", "name": "X", "email": "x@example.com", "password": "long enough password" })).send().await.unwrap();
@@ -799,4 +901,67 @@ async fn connections_proxy_only_what_admins_and_grants_allow() {
     // Disconnecting takes the permissions with it, so a later connection of the same name starts from nothing.
     owner.ok(Method::DELETE, "/connections/acme-tools", None).await;
     assert_eq!(mia.get("/me").await["user"]["grants"], json!(["linear:read"]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn notion_connects_by_oauth_and_keeps_its_token_fresh() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    let browser = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    let location = |response: &reqwest::Response| response.headers().get("location").expect("a redirect").to_str().unwrap().to_string();
+    let notion = |listing: &Value| listing["connections"].as_array().unwrap().iter().find(|c| c["name"] == "notion").cloned();
+
+    // Notion's permissions are not handed out before it is connected.
+    assert_eq!(owner.get("/me").await["user"]["grants"], json!(["github:read", "github:write", "github:open_pr", "github:merge_pr"]));
+
+    // Connecting takes no key: the admin is sent to Notion to sign in. A member is not.
+    let mia = h.member(&owner, "mia@example.com", &[]).await;
+    assert_eq!(mia.call(Method::POST, "/connections", Some(json!({ "preset": "notion" }))).await.0, StatusCode::FORBIDDEN);
+    let started = owner.post("/connections", json!({ "preset": "notion" })).await;
+    let authorize = started["authorize_url"].as_str().expect("an authorize URL").to_string();
+    assert!(authorize.starts_with(&format!("{}/notion-auth/authorize?", h.mcp_base)), "{authorize}");
+    assert!(notion(&owner.get("/connections").await).is_none(), "nothing is saved before the sign-in finishes");
+
+    // Notion sends the browser back with a code. Someone else cannot finish it...
+    let callback = location(&browser.get(&authorize).send().await.unwrap());
+    assert!(callback.starts_with(&format!("{}/api/v1/oauth/callback?", h.base)), "{callback}");
+    let state = url::Url::parse(&callback).unwrap().query_pairs().find(|(k, _)| k == "state").unwrap().1.to_string();
+    let forged = browser.get(format!("{}/api/v1/oauth/callback?code=code-1&state=not-{state}", h.base)).bearer_auth(&owner.token).send().await.unwrap();
+    assert!(location(&forged).starts_with("/settings/integrations?oauth_error="), "{}", location(&forged));
+    // ...and the admin who started it can.
+    let finished = browser.get(&callback).bearer_auth(&owner.token).send().await.unwrap();
+    assert_eq!(location(&finished), "/settings/integrations?connected=notion");
+
+    let conn = notion(&owner.get("/connections").await).expect("Notion is connected");
+    assert_eq!(conn["tools_error"], Value::Null, "{conn}");
+    let levels: Vec<String> = conn["tools"].as_array().unwrap().iter().map(|t| format!("{}={}/{}", t["name"].as_str().unwrap(), t["level"].as_str().unwrap(), t["status"].as_str().unwrap())).collect();
+    assert_eq!(levels, ["notion-search=read/automatic", "notion-create-pages=write/automatic", "notion-summon=hidden/pending"]);
+    assert!(!conn.to_string().contains("at-1") && !conn.to_string().contains("rt-1"), "tokens are never shown: {conn}");
+    // The code cannot be replayed.
+    let replayed = browser.get(&callback).bearer_auth(&owner.token).send().await.unwrap();
+    assert!(location(&replayed).starts_with("/settings/integrations?oauth_error="));
+
+    // Notion revokes the access token early. The next call renews it, once, and goes through.
+    h.mcp.oauth.lock().unwrap().revoked = true;
+    let ana = h.member(&owner, "ana@example.com", &["notion:read"]).await;
+    let prompt = "!tools\n!mcp notion_search {\"query\": \"roadmap\"}\n!mcp notion_create-pages {}";
+    let created = ana.post("/sessions", json!({ "prompt": prompt, "harness": "scripted" })).await;
+    let events = ana.wait_turns(created["session"]["id"].as_str().unwrap(), 1).await;
+    // Agents see Notion's tools without Notion's own prefix on them.
+    let listed = tool_output(&events, "tools/list");
+    assert!(listed.contains("notion_search") && !listed.contains("notion_notion") && !listed.contains("create-pages"), "{listed}");
+    assert_eq!(tool_output(&events, "notion_search"), r#"notion ran notion-search with {"query":"roadmap"}"#);
+    assert!(tool_output(&events, "notion_create-pages").contains("Denied"));
+    assert_eq!(h.mcp.oauth.lock().unwrap().refreshes, 1);
+
+    // Signing in again reuses the registered client and replaces the tokens.
+    let again = owner.post("/connections/notion/authorize", json!({})).await["authorize_url"].as_str().unwrap().to_string();
+    let callback = location(&browser.get(&again).send().await.unwrap());
+    assert_eq!(location(&browser.get(&callback).bearer_auth(&owner.token).send().await.unwrap()), "/settings/integrations?connected=notion");
+    assert_eq!(h.mcp.oauth.lock().unwrap().issued, 3);
+    assert_eq!(owner.post("/connections/notion/refresh", json!({})).await["connection"]["tools_error"], Value::Null);
+
+    // Disconnecting forgets the sign-in and everyone's Notion permissions.
+    owner.ok(Method::DELETE, "/connections/notion", None).await;
+    assert_eq!(ana.get("/me").await["user"]["grants"], json!([]));
 }

@@ -150,7 +150,8 @@ export interface Connection {
   preset: string | null;
   title: string;
   url: string;
-  auth: { header: string | null; prefix: string };
+  /** `oauth` is set when the credential comes from an OAuth sign-in; `client_id` only when an admin supplied the client. */
+  auth: { header: string | null; prefix: string; oauth: { client_id: string | null; scope: string | null } | null };
   headers: Record<string, string>;
   options: Record<string, string>;
   tools: ConnectionTool[];
@@ -175,6 +176,8 @@ export interface Preset {
   blurb: string;
   secret_label: string;
   secret_help: string;
+  /** key: an admin pastes a credential; oauth: an admin signs in with the vendor. */
+  auth: "key" | "oauth";
   options: PresetOption[];
   /** vendor: sorted by the vendor's read-only server; name: by tool name. */
   classified_by: "vendor" | "name";

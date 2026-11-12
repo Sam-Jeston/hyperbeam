@@ -180,20 +180,6 @@ pub async fn test_integration(State(app): State<App>, actor: AuthUser, Path(kind
                     Ok(format!("Authenticated to GitHub as {}", user["login"].as_str().unwrap_or("unknown")))
                 }
             }
-            "notion" => {
-                let resp = app
-                    .http
-                    .get(format!("{}/users/me", app.cfg.notion_api_url.trim_end_matches('/')))
-                    .bearer_auth(&secret)
-                    .header("notion-version", "2022-06-28")
-                    .send()
-                    .await?;
-                if !resp.status().is_success() {
-                    anyhow::bail!("Notion rejected the token ({})", resp.status());
-                }
-                let body: Value = resp.json().await?;
-                Ok(format!("Authenticated to Notion as {}", body["name"].as_str().unwrap_or("integration")))
-            }
             _ => anyhow::bail!("unknown integration"),
         }
     }

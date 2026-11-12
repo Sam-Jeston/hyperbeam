@@ -55,6 +55,8 @@ pub fn router() -> Router<App> {
         .route("/connections", get(connections::list).post(connections::create))
         .route("/connections/{name}", patch(connections::update).delete(connections::delete))
         .route("/connections/{name}/refresh", post(connections::refresh))
+        .route("/connections/{name}/authorize", post(connections::authorize))
+        .route("/oauth/callback", get(connections::oauth_callback))
         .route("/connections/{name}/approvals", put(connections::set_approvals))
         .route("/grants", get(connections::grants))
         .route("/repos", get(settings::list_repos).post(settings::add_repo))

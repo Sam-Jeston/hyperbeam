@@ -14,7 +14,7 @@ The server is configured with environment variables, or the matching command-lin
 | `HYPERBEAM_MASTER_KEY_AWS_SECRET` | none | Name or ARN of an AWS Secrets Manager secret that holds the master key. |
 | `HYPERBEAM_MASTER_KEY_AWS_KMS_KEY` | none | ID, alias or ARN of an AWS KMS key. The master key is generated on first start and stored in Postgres, encrypted by this key. |
 | `HYPERBEAM_LISTEN` | `0.0.0.0:8080` | Address the server listens on. |
-| `HYPERBEAM_PUBLIC_URL` | `http://localhost:8080` | Where people reach the UI. Used in invite links. |
+| `HYPERBEAM_PUBLIC_URL` | `http://localhost:8080` | Where people reach the UI. Used in invite links, and as where OAuth sign-ins for connections come back to, so it must be the address admins’ browsers use. |
 | `HYPERBEAM_INTERNAL_URL` | `http://127.0.0.1:8080` | Where sandboxes reach the server. |
 
 Exactly one of the three master key settings is required. See [Credentials](/credentials#the-master-key). To change the key of an installation that holds credentials, use [`rotate-master-key`](/credentials#rotating-the-master-key).
@@ -59,4 +59,3 @@ These point Hyperbeam at the services’ APIs. Change them only for testing or a
 |---|---|
 | `HYPERBEAM_GITHUB_API_URL` | `https://api.github.com` |
 | `HYPERBEAM_GITHUB_GIT_URL` | `https://github.com` |
-| `HYPERBEAM_NOTION_API_URL` | `https://api.notion.com/v1` |

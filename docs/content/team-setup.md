@@ -9,7 +9,7 @@ The first person to open a new installation creates the team and becomes its **o
 2. **Register repositories** under **Settings → Repositories**, as `owner/name`. Agents can reach only these.
 3. **Give a harness a credential** under **Settings → Harnesses**: a team API key, or each person’s own. See [Credentials](/credentials).
 4. **Invite people** from **People & permissions**, and tick what each person’s agents may do. See [People and permissions](/permissions).
-5. Optionally connect **Notion** and services such as **Linear**, **PostHog**, **Sentry** or your own MCP servers ([Integrations](/integrations)), choose a **default harness** under **Settings → General**, and add [skills and workflows](/library) in the **Library**.
+5. Optionally connect services such as **Linear**, **Notion**, **PostHog**, **Sentry** or your own MCP servers ([Integrations](/integrations)), choose a **default harness** under **Settings → General**, and add [skills and workflows](/library) in the **Library**.
 
 ## Invites
 

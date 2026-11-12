@@ -360,7 +360,7 @@ function Security() {
     ["github:open_pr", "open pull requests"],
     ["github:merge_pr", "merge pull requests; push to the default branch"],
     ["linear:read · write", "read, or create, update and comment on issues"],
-    ["notion:read · write", "read, or create and append to pages"],
+    ["notion:read · write", "search and read, or create and edit pages"],
   ];
   return (
     <Section id="security">

@@ -37,6 +37,10 @@ pub struct Inner {
     pub mcp: crate::connections::client::McpClient,
     /// Connections whose tools are being re-listed.
     pub refreshing: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// OAuth sign-ins an admin has started and not yet finished, by `state`.
+    pub oauth_flows: std::sync::Mutex<std::collections::HashMap<String, crate::connections::oauth::Pending>>,
+    /// Held while a connection's OAuth token is renewed.
+    pub oauth_refresh: tokio::sync::Mutex<()>,
 }
 
 #[derive(Clone)]
@@ -69,6 +73,8 @@ impl App {
             github_tokens: GithubTokens::default(),
             mcp: Default::default(),
             refreshing: Default::default(),
+            oauth_flows: Default::default(),
+            oauth_refresh: Default::default(),
         }))
     }
 

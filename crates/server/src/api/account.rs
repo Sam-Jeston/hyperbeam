@@ -63,7 +63,7 @@ pub async fn setup(State(app): State<App>, Json(body): Json<SetupBody>) -> ApiRe
     .bind(body.name.trim())
     .bind(hash)
     // Everything built in. Connections are granted as they are added.
-    .bind(json!(GrantSet::parse_many(["github:merge_pr", "github:write", "github:open_pr", "notion:write"]).expect("valid grants")))
+    .bind(json!(GrantSet::parse_many(["github:merge_pr", "github:write", "github:open_pr"]).expect("valid grants")))
     .fetch_optional(&app.db)
     .await?;
     let user = user.ok_or_else(|| ApiError::Conflict("this installation is already set up".into()))?;

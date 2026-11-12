@@ -11,6 +11,7 @@
 //! since, stays hidden.
 
 pub mod client;
+pub mod oauth;
 pub mod presets;
 
 use crate::app::App;
@@ -56,6 +57,10 @@ pub struct Auth {
     /// Written before the credential, e.g. `Bearer `.
     #[serde(default)]
     pub prefix: String,
+    /// Set when the credential is a token from an OAuth sign-in, which
+    /// Hyperbeam keeps fresh, rather than a key an admin pasted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<oauth::OAuth>,
 }
 
 /// A tool as the upstream server last described it.
@@ -149,8 +154,18 @@ impl Connection {
         self.preset().map(|p| p.write_label.to_string()).unwrap_or_else(|| "Use its write tools".into())
     }
 
+    /// The name agents see a tool under, after `<connection>_`. A vendor
+    /// that prefixes every tool with its own name loses the prefix:
+    /// Notion's `notion-search` is `notion_search`, not `notion_notion-search`.
+    pub fn short_name<'a>(&self, tool: &'a str) -> &'a str {
+        self.preset().map_or(tool, |p| p.short_name(tool))
+    }
+
     /// The full endpoint, credential included.
     pub async fn endpoint(&self, app: &App) -> Result<Endpoint> {
+        if self.token_expiring() {
+            app.refresh_oauth(&self.name, None).await?;
+        }
         let mut headers: Vec<(String, String)> = self.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         if let Some(preset) = self.preset() {
             headers.extend(preset.headers.iter().map(|(k, v)| (k.to_string(), v.to_string())));
@@ -188,7 +203,15 @@ impl Connection {
             "preset": self.preset,
             "title": self.title,
             "url": self.url,
-            "auth": { "header": self.auth.header, "prefix": self.auth.prefix },
+            "auth": {
+                "header": self.auth.header,
+                "prefix": self.auth.prefix,
+                "oauth": self.auth.oauth.as_ref().map(|o| json!({
+                    // A client the server registered is not the admin's to edit.
+                    "client_id": (!o.registered).then_some(&o.client_id),
+                    "scope": o.scope,
+                })),
+            },
             "headers": self.headers.0,
             "options": self.options.0,
             "tools": tools,
@@ -256,10 +279,30 @@ impl App {
         Ok(conn)
     }
 
+    /// After a server turned `endpoint` down: if its credential is a token
+    /// from an OAuth sign-in, get a new token and return the endpoint to try
+    /// once more. `None` when there is nothing to renew.
+    pub async fn renewed(&self, conn: &Connection, endpoint: &Endpoint, err: &anyhow::Error) -> Result<Option<Endpoint>> {
+        let unauthorized = err.downcast_ref::<client::Refused>().is_some_and(|r| r.status == reqwest::StatusCode::UNAUTHORIZED);
+        let (true, Some(_), Some((_, sent))) = (unauthorized, &conn.auth.oauth, endpoint.headers.last()) else { return Ok(None) };
+        let token = sent.strip_prefix(conn.auth.prefix.as_str()).unwrap_or(sent);
+        self.refresh_oauth(&conn.name, Some(token)).await?;
+        Ok(Some(conn.endpoint(self).await?))
+    }
+
     async fn discover(&self, conn: &Connection) -> Result<Vec<Tool>> {
-        let endpoint = conn.endpoint(self).await?;
-        let listed = self.mcp.list_tools(&self.http, &endpoint).await?;
         let preset = conn.preset();
+        let mut endpoint = conn.endpoint(self).await?;
+        let listed = match self.mcp.list_tools(&self.http, &endpoint).await {
+            Ok(listed) => listed,
+            Err(err) => match self.renewed(conn, &endpoint, &err).await? {
+                Some(fresh) => {
+                    endpoint = fresh;
+                    self.mcp.list_tools(&self.http, &endpoint).await?
+                }
+                None => return Err(err),
+            },
+        };
         let read_only: Option<Vec<String>> = match preset.and_then(|p| p.read_only(&endpoint)) {
             Some(variant) => {
                 let tools = self.mcp.list_tools(&self.http, &variant).await.context("could not list the read-only tools")?;
@@ -270,7 +313,8 @@ impl App {
         let mut tools = Vec::new();
         for raw in listed {
             let Some(name) = raw.get("name").and_then(Value::as_str).filter(|n| usable_name(n)) else { continue };
-            if tools.iter().any(|t: &Tool| t.name == name) {
+            // Agents tell tools apart by their short names.
+            if tools.iter().any(|t: &Tool| conn.short_name(&t.name) == conn.short_name(name)) {
                 continue;
             }
             let annotations = raw.get("annotations").cloned().unwrap_or(Value::Null);
@@ -323,8 +367,6 @@ impl App {
     pub async fn grant_catalog(&self) -> Result<Vec<Value>> {
         let info = |grant: &Grant, label: &str, title: &str| json!({ "id": grant.to_string(), "label": label, "system": grant.system(), "system_title": title });
         let mut list: Vec<Value> = Grant::GITHUB_ALL.iter().map(|g| info(g, g.label(), "GitHub")).collect();
-        list.push(info(&Grant::read("notion")?, "Read pages and databases", "Notion"));
-        list.push(info(&Grant::write("notion")?, "Create and edit pages", "Notion"));
         for conn in all(&self.db).await? {
             list.push(info(&Grant::read(&conn.name)?, &conn.read_label(), &conn.title));
             list.push(info(&Grant::write(&conn.name)?, &conn.write_label(), &conn.title));
@@ -348,7 +390,7 @@ impl App {
                 )
                 .bind(preset.title)
                 .bind(self.preset_url(preset, &json!({})))
-                .bind(Json(Auth { header: Some(preset.auth_header.into()), prefix: preset.auth_prefix.into() }))
+                .bind(Json(Auth { header: Some(preset.auth_header.into()), prefix: preset.auth_prefix.into(), oauth: None }))
                 .execute(&self.db)
                 .await?;
                 tracing::info!("moved the Linear integration to the Linear MCP connection");

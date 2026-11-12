@@ -1,8 +1,9 @@
-// MCP connections: first-class services (Linear, PostHog, Sentry) and any
+// MCP connections: first-class services (Linear, Notion, PostHog, Sentry) and any
 // other MCP server a team wants its agents to reach, through the gateway.
 
 import { Plus, RefreshCw, Search, ShieldCheck, Wrench } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { SwitchRow } from "../components/ui/controls";
 import { confirm, Modal } from "../components/ui/dialog";
@@ -17,7 +18,15 @@ import { cn } from "../lib/utils";
 interface Listing {
   presets: Preset[];
   connections: Connection[];
+  /** Where OAuth sign-ins come back to; registered with the vendor when an admin creates a client by hand. */
+  oauth_redirect_uri: string;
 }
+
+/** A save either takes effect, or needs the admin to sign in with the vendor first. */
+type Saved = { connection: Connection; authorize_url?: undefined } | { authorize_url: string; connection?: undefined };
+
+/** Send the browser to the vendor to sign in. It comes back to this screen. */
+const signIn = (url: string) => new Promise<never>(() => window.location.assign(url));
 
 /** One card per first-class service, connected or not, then custom connections. */
 export function Connections({ isAdmin }: { isAdmin: boolean }) {
@@ -25,6 +34,21 @@ export function Connections({ isAdmin }: { isAdmin: boolean }) {
   const [editing, setEditing] = useState<{ preset: Preset | null; connection: Connection | null } | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
   const changed = () => (reload(), void reloadGrants());
+
+  // Back from an OAuth sign-in: say how it went, then tidy the address bar.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const [connected, failed] = [params.get("connected"), params.get("oauth_error")];
+    if (!connected && !failed) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    if (failed) toast.error(failed, { duration: 12000 });
+    else if (connected) {
+      toast.success("Signed in");
+      void reloadGrants();
+      // Fresh from the server: show what it offers straight away.
+      setReviewing(connected);
+    }
+  }, []);
   const custom = data?.connections.filter((c) => !c.preset) ?? [];
   const reviewed = data?.connections.find((c) => c.name === reviewing) ?? null;
 
@@ -74,6 +98,7 @@ export function Connections({ isAdmin }: { isAdmin: boolean }) {
         <ConnectionDialog
           preset={editing.preset}
           connection={editing.connection}
+          redirectUri={data?.oauth_redirect_uri ?? ""}
           onClose={() => setEditing(null)}
           onSaved={(saved) => {
             setEditing(null);
@@ -130,15 +155,17 @@ function ConnectionCard(props: {
 const AUTH_OPTIONS = [
   { value: "bearer", label: "Bearer token", description: "Sent as Authorization: Bearer …" },
   { value: "header", label: "Custom header", description: "Sent as-is in a header you name, e.g. X-Api-Key" },
+  { value: "oauth", label: "OAuth sign-in", description: "You sign in with the service; Hyperbeam keeps the token fresh" },
   { value: "none", label: "No credential", description: "For servers inside your network that need none" },
 ];
 
 function authKind(connection: Connection | null): string {
+  if (connection?.auth.oauth) return "oauth";
   if (!connection?.auth.header) return connection ? "none" : "bearer";
   return connection.auth.header.toLowerCase() === "authorization" && connection.auth.prefix === "Bearer " ? "bearer" : "header";
 }
 
-function ConnectionDialog(props: { preset: Preset | null; connection: Connection | null; onClose: () => void; onSaved: (saved: Connection | null) => void }) {
+function ConnectionDialog(props: { preset: Preset | null; connection: Connection | null; redirectUri: string; onClose: () => void; onSaved: (saved: Connection | null) => void }) {
   const { preset, connection } = props;
   const [name, setName] = useState(connection?.name ?? "");
   const [title, setTitle] = useState(connection?.title ?? "");
@@ -151,19 +178,35 @@ function ConnectionDialog(props: { preset: Preset | null; connection: Connection
     return initial;
   });
   const [secret, setSecret] = useState("");
+  const [clientId, setClientId] = useState(connection?.auth.oauth?.client_id ?? "");
+  const [clientSecret, setClientSecret] = useState("");
+  const [scope, setScope] = useState(connection?.auth.oauth?.scope ?? "");
   const action = useAction();
   const label = preset?.title ?? (connection?.title || "custom connection");
-  const needsSecret = preset ? true : auth !== "none";
+  const oauth = preset ? preset.auth === "oauth" : auth === "oauth";
+  const signedIn = Boolean(connection?.auth.oauth);
+  const needsSecret = !oauth && (preset ? true : auth !== "none");
   const ready = connection ? true : (preset || (name.trim() && url.trim())) && (!needsSecret || secret.trim());
 
   const save = () =>
     action.run(async () => {
       const body = preset
         ? { preset: preset.id, options, secret: secret || undefined }
-        : { name: name.trim(), title: title.trim() || undefined, url: url.trim(), auth: { kind: auth, header: header.trim() || undefined }, secret: secret || undefined };
-      const result = connection ? await api.patch(`/connections/${connection.name}`, body) : await api.post("/connections", body);
-      props.onSaved(result.connection);
-    }, { success: `${label} ${connection ? "updated" : "connected"}` });
+        : {
+            name: name.trim(),
+            title: title.trim() || undefined,
+            url: url.trim(),
+            auth: { kind: auth, header: header.trim() || undefined, client_id: clientId.trim() || undefined, client_secret: clientSecret || undefined, scope: scope.trim() || undefined },
+            secret: secret || undefined,
+          };
+      const result: Saved = connection ? await api.patch(`/connections/${connection.name}`, body) : await api.post("/connections", body);
+      if (result.authorize_url) await signIn(result.authorize_url);
+      else {
+        toast.success(`${label} ${connection ? "updated" : "connected"}`);
+        props.onSaved(result.connection ?? null);
+      }
+    });
+  const signInAgain = () => action.run(async () => signIn((await api.post(`/connections/${connection!.name}/authorize`)).authorize_url));
 
   const disconnect = async () => {
     const ok = await confirm({
@@ -184,7 +227,8 @@ function ConnectionDialog(props: { preset: Preset | null; connection: Connection
         <>
           {connection && <Button variant="danger-ghost" className="mr-auto" disabled={action.busy} onClick={() => void disconnect()}>Disconnect</Button>}
           <Button onClick={props.onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!ready} loading={action.busy} onClick={() => void save()}>{connection ? "Save" : "Connect"}</Button>
+          {signedIn && <Button disabled={action.busy} onClick={() => void signInAgain()}>Sign in again</Button>}
+          <Button variant="primary" disabled={!ready} loading={action.busy} onClick={() => void save()}>{connection ? "Save" : oauth ? `Sign in with ${label}` : "Connect"}</Button>
         </>
       }
     >
@@ -221,6 +265,20 @@ function ConnectionDialog(props: { preset: Preset | null; connection: Connection
           </Field>
           <Field label="Credential">{(id) => <Select id={id} value={auth} onValueChange={setAuth} options={AUTH_OPTIONS} />}</Field>
           {auth === "header" && <Field label="Header name">{(id) => <Input id={id} mono value={header} onChange={(e) => setHeader(e.target.value)} placeholder="X-Api-Key" />}</Field>}
+          {auth === "oauth" && (
+            <>
+              <p className="text-[13px] text-muted">
+                You will be sent to the service to sign in, and agents act as the account you sign in with. Most MCP servers let Hyperbeam register itself, so the fields below can stay empty. If this one does not, create an OAuth client with it using the redirect URL <code className="font-mono text-[12.5px] break-all">{props.redirectUri}</code> and enter its details.
+              </p>
+              <Field label="Client ID" optional>{(id) => <Input id={id} mono autoComplete="off" value={clientId} onChange={(e) => setClientId(e.target.value)} />}</Field>
+              <Field label="Client secret" optional hint={signedIn ? "Leave blank to keep the current one. Stored encrypted and never shown again." : "Only if the client has one. Stored encrypted and never shown again."}>
+                {(id) => <Input id={id} type="password" mono autoComplete="off" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />}
+              </Field>
+              <Field label="Scopes" optional hint="Space-separated. Leave blank to ask for what the server suggests.">
+                {(id) => <Input id={id} mono value={scope} onChange={(e) => setScope(e.target.value)} />}
+              </Field>
+            </>
+          )}
         </>
       )}
       {needsSecret && (

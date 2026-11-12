@@ -9,7 +9,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 /// Built-in integrations. Everything else is an MCP connection.
-pub const KINDS: [&str; 2] = ["github", "notion"];
+pub const KINDS: [&str; 1] = ["github"];
 
 pub fn secret_key(kind: &str) -> String {
     format!("integration/{kind}")

@@ -128,15 +128,21 @@ impl McpClient {
     }
 }
 
+/// The server turned the credential down.
+#[derive(Debug, thiserror::Error)]
+#[error("{label} refused the credential ({status}). An admin can update it under Settings → Integrations.")]
+pub struct Refused {
+    pub label: String,
+    pub status: StatusCode,
+}
+
 fn check_status(endpoint: &Endpoint, status: StatusCode, reply: Option<&Value>) -> Result<()> {
     if status.is_success() {
         return Ok(());
     }
     let label = &endpoint.label;
     match status {
-        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-            bail!("{label} refused the credential ({status}). An admin can update it under Settings → Integrations.")
-        }
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(Refused { label: label.clone(), status }.into()),
         _ => {
             let message = reply.and_then(|r| r.pointer("/error/message")).and_then(Value::as_str).unwrap_or("");
             bail!("{label} answered {status}{}", if message.is_empty() { String::new() } else { format!(": {message}") })

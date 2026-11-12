@@ -25,7 +25,7 @@ Some harness profiles also accept a personal subscription token (for Claude Code
 
 Credentials are encrypted at rest with AES-256-GCM, using the installation’s master key. Each one is bound to its owner and harness, so a stored credential can’t be moved to another person or harness. They are never shown again after you save them.
 
-Integration and connection credentials for GitHub, Notion, Linear and other services stay in the control plane and never enter a sandbox. See [Security model](/security).
+Integration and connection credentials for GitHub, Linear, Notion and other services stay in the control plane and never enter a sandbox. See [Security model](/security).
 
 ## What the agent can see
 

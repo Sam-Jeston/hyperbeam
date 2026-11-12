@@ -13,6 +13,7 @@ The end-to-end tests start a real server, real runner processes driving a script
 - cloning and pushing through the git proxy, including default-branch protection;
 - opening pull requests through the gateway;
 - MCP connections against fake upstream servers: tool review, grants, read calls through a read-only variant, changed tools hidden again, and permissions removed on disconnect;
+- connecting by OAuth against a fake authorization server: discovery, client registration, PKCE, and renewing a token the server has revoked;
 - denial and audit of what is not permitted;
 - immediate revocation;
 - resuming after teardown;
@@ -35,5 +36,5 @@ On a local `kind` cluster (Kubernetes 1.34) with the Helm chart:
 - One team per installation.
 - The control plane runs as a single replica.
 - Sign-in is email and password only (no OIDC yet).
-- Notion and connections use a key rather than an OAuth flow, so agents act as that key’s user. OAuth-only and stdio-only MCP servers can’t be connected yet.
+- A connection has one credential or one OAuth sign-in, shared by every agent, so agents act as that one account. Stdio-only MCP servers can’t be connected yet.
 - Workspaces are ephemeral, so work survives a teardown only if it was pushed.

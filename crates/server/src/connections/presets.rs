@@ -32,6 +32,11 @@ pub struct Preset {
     pub secret_help: &'static str,
     pub auth_header: &'static str,
     pub auth_prefix: &'static str,
+    /// The credential is a token from an OAuth sign-in rather than a key an
+    /// admin pastes.
+    pub oauth: bool,
+    /// A prefix the vendor puts on every tool name, which agents do not see.
+    pub tool_prefix: &'static str,
     /// Headers always sent.
     pub headers: &'static [(&'static str, &'static str)],
     pub read_label: &'static str,
@@ -57,6 +62,8 @@ pub const PRESETS: &[Preset] = &[
                       A key with only the Read permission limits every agent to reading, whatever their grants.",
         auth_header: "Authorization",
         auth_prefix: "Bearer ",
+        oauth: false,
+        tool_prefix: "",
         headers: &[],
         read_label: "Read issues, projects and comments",
         write_label: "Create and update issues, projects and comments",
@@ -73,6 +80,8 @@ pub const PRESETS: &[Preset] = &[
                       Agents act as this key’s user, within the projects and scopes it allows.",
         auth_header: "Authorization",
         auth_prefix: "Bearer ",
+        oauth: false,
+        tool_prefix: "",
         // One tool per operation rather than a single catch-all `exec` tool,
         // so each can be classified and granted on its own.
         headers: &[("x-posthog-mcp-mode", "tools")],
@@ -108,6 +117,8 @@ pub const PRESETS: &[Preset] = &[
         auth_header: "Authorization",
         // Sentry reserves `Bearer` for its own OAuth tokens.
         auth_prefix: "Sentry-Bearer ",
+        oauth: false,
+        tool_prefix: "",
         headers: &[],
         read_label: "Search and read issues, events, traces and releases",
         write_label: "Update issues, add notes, and create or change projects and monitors",
@@ -123,6 +134,34 @@ pub const PRESETS: &[Preset] = &[
             Some(org) => format!("https://mcp.sentry.dev/mcp/{}", url::form_urlencoded::byte_serialize(org.as_bytes()).collect::<String>()),
             None => "https://mcp.sentry.dev/mcp".into(),
         },
+    },
+    Preset {
+        id: "notion",
+        title: "Notion",
+        blurb: "Lets agents search, read, create and edit pages, databases and comments.",
+        secret_label: "",
+        secret_help: "You will be sent to Notion to sign in and choose what to share. Agents act as the account you sign in with, \
+                      and reach what that account can, so consider a dedicated account that is given only the pages agents should see.",
+        auth_header: "Authorization",
+        auth_prefix: "Bearer ",
+        oauth: true,
+        // Every tool is `notion-…`; agents see `notion_search`, not `notion_notion-search`.
+        tool_prefix: "notion-",
+        headers: &[],
+        read_label: "Search and read pages, databases and comments",
+        write_label: "Create, edit, move and delete pages, databases and comments",
+        classify: Classify::Prefixes {
+            read: &[
+                "search", "fetch", "get_", "list_", "query_", "view_", "read_", "download_", "wait_",
+                "ai_search", "connector_search", "memory_search", "calendar_list_",
+            ],
+            write: &[
+                "create_", "update_", "delete_", "move_", "duplicate_", "restore_", "resolve_", "set_", "send_",
+                "spawn_", "stop_", "upload_", "convert_", "calendar_create_", "calendar_update_", "calendar_cancel_",
+            ],
+        },
+        options: || json!([]),
+        url: |_| "https://mcp.notion.com/mcp".into(),
     },
 ];
 
@@ -151,7 +190,7 @@ impl Preset {
     /// Classify by name, for presets that sort by prefix.
     pub fn by_prefix(&self, tool: &str, annotations: &Value) -> Option<super::ToolLevel> {
         let Classify::Prefixes { read, write } = &self.classify else { return None };
-        let name = tool.to_ascii_lowercase().replace('-', "_");
+        let name = self.short_name(tool).to_ascii_lowercase().replace('-', "_");
         let marked_writing = annotations.get("readOnlyHint") == Some(&Value::Bool(false))
             || annotations.get("destructiveHint") == Some(&Value::Bool(true));
         if write.iter().any(|p| name.starts_with(p)) {
@@ -164,6 +203,11 @@ impl Preset {
         }
     }
 
+    /// A tool's name without the vendor's prefix.
+    pub fn short_name<'a>(&self, tool: &'a str) -> &'a str {
+        tool.strip_prefix(self.tool_prefix).filter(|rest| !rest.is_empty()).unwrap_or(tool)
+    }
+
     pub fn describe(&self) -> Value {
         json!({
             "id": self.id,
@@ -171,6 +215,7 @@ impl Preset {
             "blurb": self.blurb,
             "secret_label": self.secret_label,
             "secret_help": self.secret_help,
+            "auth": if self.oauth { "oauth" } else { "key" },
             "options": (self.options)(),
             "classified_by": match self.classify {
                 Classify::ReadOnlyVariant(_) => "vendor",
@@ -215,5 +260,21 @@ mod tests {
         assert_eq!(sentry.by_prefix("get_or_create_thing", &json!({ "readOnlyHint": false })), Some(ToolLevel::Write));
         assert_eq!(sentry.by_prefix("update_issue", &json!({ "readOnlyHint": true })), Some(ToolLevel::Write));
         assert_eq!(sentry.by_prefix("analyze_issue_with_seer", &json!({})), None);
+    }
+
+    #[test]
+    fn notion_tools_lose_their_prefix_and_sort_by_what_follows() {
+        let notion = find("notion").unwrap();
+        assert_eq!(notion.short_name("notion-search"), "search");
+        assert_eq!(notion.short_name("search"), "search");
+        assert_eq!(find("sentry").unwrap().short_name("notion-search"), "notion-search");
+        for read in ["notion-search", "notion-fetch", "notion-get-comments", "notion-query-data-sources", "notion-calendar-list-events", "notion-list-recent-pages"] {
+            assert_eq!(notion.by_prefix(read, &json!({})), Some(ToolLevel::Read), "{read}");
+        }
+        for write in ["notion-create-pages", "notion-update-page", "notion-delete-pages", "notion-move-pages", "notion-calendar-cancel-events", "notion-spawn-session"] {
+            assert_eq!(notion.by_prefix(write, &json!({})), Some(ToolLevel::Write), "{write}");
+        }
+        assert_eq!(notion.by_prefix("notion-get-or-make", &json!({ "readOnlyHint": false })), Some(ToolLevel::Write));
+        assert_eq!(notion.by_prefix("notion-something-new", &json!({})), None);
     }
 }
