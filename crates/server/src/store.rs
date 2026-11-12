@@ -44,6 +44,8 @@ impl User {
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct Repo {
     pub id: Uuid,
+    /// The code host it is on: `github` or `gitlab`.
+    pub host: String,
     pub full_name: String,
     pub default_branch: String,
     pub description: String,

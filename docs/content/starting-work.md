@@ -32,7 +32,7 @@ Open **Skills and permissions** to:
 - pick **skills** to install in the sandbox, and
 - untick **permissions** the agent does not need. An agent can never do more than you can, so the list shows only what you hold.
 
-Checking out repositories needs *Read repositories* (`github:read`).
+Checking out repositories needs *Read repositories* on the host they are on (`github:read` or `gitlab:read`).
 
 ## Put it on the board
 

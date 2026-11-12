@@ -1,6 +1,6 @@
-use super::{ToolDef, ToolError, ToolOutput, ToolResult, arg_list, arg_opt, arg_str, arg_u64, schema, session_repo};
+use super::{ToolDef, ToolError, ToolOutput, ToolResult, arg_list, arg_opt, arg_str, arg_u64, attach_link, clip, s, schema, session_repo};
 use crate::app::App;
-use crate::integrations::github::Access;
+use crate::integrations::{Access, Host};
 use crate::store::{self, Link, Session};
 use hyperbeam_core::Grant;
 use reqwest::Method;
@@ -70,49 +70,8 @@ pub fn tools() -> Vec<ToolDef> {
     ]
 }
 
-fn s<'a>(value: &'a Value, pointer: &str) -> &'a str {
-    value.pointer(pointer).and_then(Value::as_str).unwrap_or("")
-}
-
-fn clip(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        format!("{}… [truncated]", text.chars().take(max).collect::<String>())
-    }
-}
-
-/// Record a link on the session and its workstream, so the team can find it.
-async fn attach_link(app: &App, session: &Session, link: &Link) {
-    let value = json!([link]);
-    sqlx::query("UPDATE sessions SET links = links || $2 WHERE id = $1 AND NOT links @> $2")
-        .bind(session.id)
-        .bind(&value)
-        .execute(&app.db)
-        .await
-        .ok();
-    app.publish_session(session.id).await;
-    if let Some(ws) = session.workstream_id {
-        sqlx::query("UPDATE workstreams SET links = links || $2, updated_at = now() WHERE id = $1 AND NOT links @> $2")
-            .bind(ws)
-            .bind(&value)
-            .execute(&app.db)
-            .await
-            .ok();
-        if link.kind == "pull_request" {
-            // A pull request means people are up next.
-            sqlx::query("UPDATE workstreams SET status = 'review' WHERE id = $1 AND status IN ('scoping', 'building')")
-                .bind(ws)
-                .execute(&app.db)
-                .await
-                .ok();
-        }
-        app.publish("workstream", None, json!({ "id": ws }));
-    }
-}
-
 pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> ToolResult {
-    let repo = session_repo(session, args)?;
+    let repo = session_repo(app, session, args, Host::Github).await?;
     let get = async |path: String| app.github_api(Method::GET, &repo, &path, Access::Read, None).await;
     match name {
         "github_list_issues" => {

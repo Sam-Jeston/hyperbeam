@@ -1,6 +1,6 @@
 ---
 title: Integrations
-description: Connect GitHub, first-class services like Linear, Notion, PostHog, Sentry and web search, and any other MCP server.
+description: Connect GitHub or GitLab, first-class services like Linear, Notion, PostHog, Sentry and web search, and any other MCP server.
 ---
 
 Integrations are set under **Settings → Integrations** by an admin. Their credentials stay in Hyperbeam’s control plane. Agents never see them: every request an agent makes goes through Hyperbeam, which checks it against the permissions of the person who started the agent. Select **Test** on a connected integration to check its credential.
@@ -12,9 +12,22 @@ Choose how Hyperbeam authenticates:
 - **GitHub App** (recommended for organisations). Create a GitHub App with repository permissions *Contents*, *Pull requests* and *Issues* set to read & write, and install it on the repositories you will register. Paste its App ID and a generated private key. Hyperbeam mints a short-lived token per repository for each request.
 - **Access token** (simplest; good for one person or a small team). A fine-grained personal access token limited to the repositories you will register, with *Contents*, *Pull requests* and *Issues* set to read & write. Everything agents do on GitHub appears as this token’s user.
 
+## GitLab
+
+Works with gitlab.com and with a GitLab your team runs itself. Give Hyperbeam:
+
+- the **GitLab address**, if it is not `https://gitlab.com`, and
+- an **access token** with the `api` and `write_repository` scopes. A project or group access token limited to what you will register is best; a personal access token works too. Give it at least the Developer role, or Maintainer if agents should merge or push to protected branches. Everything agents do on GitLab appears as this token’s user.
+
+GitLab has its own permissions (`gitlab:read`, `gitlab:write`, `gitlab:open_pr`, `gitlab:merge_pr`), which can be granted once it is connected. Nobody holds them to begin with, and disconnecting GitLab removes them from everyone. Agents get `gitlab_*` tools for issues and merge requests in place of the `github_*` ones.
+
+GitHub and GitLab can be connected at the same time, and one agent can work across repositories on both.
+
 ## Repositories
 
-Agents can reach only repositories registered under **Settings → Repositories**, and only the ones their owner [has access to](/permissions#repository-access). Register one as `owner/name`.
+Agents can reach only repositories registered under **Settings → Repositories**, and only the ones their owner [has access to](/permissions#repository-access). Register one as `owner/name`, or for a GitLab project under subgroups, its whole path: `group/subgroup/project`. Pasting the repository’s address works too. With both hosts connected, choose which one the repository is on.
+
+A path can be registered once, on one host: `acme/api` cannot be both a GitHub repository and a GitLab project.
 
 Removing a repository stops new agents from using it. Agents already running keep the repositories they started with until they stop. The repository itself is untouched.
 
@@ -73,6 +86,6 @@ The access and refresh tokens are stored encrypted in the control plane, like ev
 **Disconnect** deletes the credential, stops agents using the connection straight away, and removes everyone’s permissions for it. A later connection with the same name starts with nobody holding its permissions.
 
 > [!NOTE]
-> GitHub App mode and the first-class connections are written against the vendors’ documentation but have not yet been tested against the real services. See [What is verified](/status).
+> GitHub App mode, GitLab and the first-class connections are written against the vendors’ documentation but have not yet been tested against the real services. See [What is verified](/status).
 
 An existing Linear integration from an earlier version is moved to the Linear connection automatically, with its key. An earlier version’s Notion integration is not: Notion’s MCP server does not accept the internal integration secret it used, so that secret is deleted on upgrade and an admin signs in to Notion again. People keep the Notion permissions they held.

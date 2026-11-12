@@ -19,6 +19,7 @@ use crate::store;
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use client::Endpoint;
+use hyperbeam_core::grants::GITLAB;
 use hyperbeam_core::{Grant, Level};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -26,7 +27,7 @@ use sqlx::types::Json;
 use std::collections::BTreeMap;
 
 /// Names custom connections may not take: built-in systems and presets.
-pub const RESERVED: &[&str] = &["github", "notion", "hyperbeam", "platform", "mcp", "web"];
+pub const RESERVED: &[&str] = &["github", "gitlab", "notion", "hyperbeam", "platform", "mcp", "web"];
 
 /// Tools are re-listed in the background when this old.
 const STALE_AFTER_SECS: i64 = 6 * 3600;
@@ -366,7 +367,11 @@ impl App {
     /// Every permission that can be granted on this installation.
     pub async fn grant_catalog(&self) -> Result<Vec<Value>> {
         let info = |grant: &Grant, label: &str, title: &str| json!({ "id": grant.to_string(), "label": label, "system": grant.system(), "system_title": title });
+        // GitHub's are always on offer; GitLab's once it is connected.
         let mut list: Vec<Value> = Grant::GITHUB_ALL.iter().map(|g| info(g, g.label(), "GitHub")).collect();
+        if self.integration_config(GITLAB).await?.is_some() {
+            list.extend(Grant::GITLAB_ALL.iter().map(|g| info(g, g.label(), "GitLab")));
+        }
         if crate::gateway::web::Policy::load(self).await?.mode != crate::gateway::web::Mode::Off {
             list.push(info(&Grant::WEB_READ, Grant::WEB_READ.label(), "Web"));
         }

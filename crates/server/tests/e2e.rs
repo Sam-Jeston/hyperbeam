@@ -1,5 +1,5 @@
 //! End-to-end tests: a real server, a real Postgres, real runner processes
-//! driving a scripted test agent, and a fake GitHub (REST API plus a genuine git
+//! driving a scripted test agent, and a fake GitHub and GitLab (REST API plus a genuine git
 //! smart-HTTP backend) and fake MCP servers standing in for the outside world.
 //!
 //! Needs Postgres. Set `HYPERBEAM_TEST_DATABASE_URL` to a server-level URL
@@ -32,6 +32,7 @@ struct ConfigArgs {
 }
 
 const UPSTREAM_TOKEN: &str = "ghp_test_upstream_token";
+const GITLAB_TOKEN: &str = "glpat-test-upstream-token";
 
 // ------------------------------------------------------------- fake GitHub
 
@@ -56,21 +57,33 @@ fn git(dir: &std::path::Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+/// The GitLab project the fake serves, under nested groups.
+const WIDGET: &str = "platform/tools/widget";
+
 impl FakeGithub {
-    /// A bare repository at `<root>/acme/demo.git` with one commit on main.
+    /// A bare repository at `<root>/acme/demo.git` with one commit on main,
+    /// and, for the GitLab stand-in, another at `<root>/gitlab/platform/tools/widget.git`.
     fn new(root: PathBuf) -> Self {
-        let bare = root.join("acme/demo.git");
-        std::fs::create_dir_all(&bare).unwrap();
-        git(&bare, &["init", "--bare", "--initial-branch=main", "-q"]);
-        git(&bare, &["config", "http.receivepack", "true"]);
         let seed = root.join("seed");
         std::fs::create_dir_all(&seed).unwrap();
         git(&seed, &["init", "--initial-branch=main", "-q"]);
         std::fs::write(seed.join("README.md"), "# demo\n").unwrap();
         git(&seed, &["add", "."]);
         git(&seed, &["commit", "-qm", "initial"]);
-        git(&seed, &["push", "-q", bare.to_str().unwrap(), "main"]);
+        for bare in [root.join("acme/demo.git"), root.join("gitlab").join(format!("{WIDGET}.git"))] {
+            std::fs::create_dir_all(&bare).unwrap();
+            git(&bare, &["init", "--bare", "--initial-branch=main", "-q"]);
+            git(&bare, &["config", "http.receivepack", "true"]);
+            git(&seed, &["push", "-q", bare.to_str().unwrap(), "main"]);
+        }
         Self { root, calls: Arc::default() }
+    }
+
+    fn gitlab_branches(&self) -> Vec<String> {
+        git(&self.root.join("gitlab").join(format!("{WIDGET}.git")), &["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+            .lines()
+            .map(str::to_string)
+            .collect()
     }
 
     fn branches(&self) -> Vec<String> {
@@ -86,6 +99,11 @@ impl FakeGithub {
             .route("/api/repos/{owner}/{repo}/pulls", post(create_pull))
             .route("/api/repos/{owner}/{repo}/pulls/{number}/merge", put(merge_pull))
             .route("/git/{*path}", any(git_backend))
+            .route("/gitlab/api/v4/user", get(gitlab_user))
+            .route("/gitlab/api/v4/projects/{id}", get(gitlab_project))
+            .route("/gitlab/api/v4/projects/{id}/merge_requests", post(gitlab_create_mr))
+            .route("/gitlab/api/v4/projects/{id}/merge_requests/{iid}/merge", put(gitlab_merge_mr))
+            .route("/gitlab/{*path}", any(gitlab_git_backend))
             .with_state(self)
     }
 }
@@ -118,21 +136,59 @@ async fn merge_pull(State(gh): State<FakeGithub>, Path((owner, repo, number)): P
     axum::Json(json!({ "merged": true, "sha": "abc123" })).into_response()
 }
 
-/// Serve the git smart-HTTP protocol by running `git http-backend` as CGI.
-async fn git_backend(
-    State(gh): State<FakeGithub>,
-    Path(path): Path<String>,
-    RawQuery(query): RawQuery,
-    method: Method,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
+fn gitlab_authorized(headers: &HeaderMap) -> bool {
+    headers.get("private-token").and_then(|v| v.to_str().ok()) == Some(GITLAB_TOKEN)
+}
+
+async fn gitlab_user(headers: HeaderMap) -> Response {
+    if !gitlab_authorized(&headers) {
+        return (StatusCode::UNAUTHORIZED, axum::Json(json!({ "message": "401 Unauthorized" }))).into_response();
+    }
+    axum::Json(json!({ "username": "hyperbeam-bot" })).into_response()
+}
+
+/// Projects are addressed by their URL-encoded path, which arrives decoded.
+async fn gitlab_project(Path(id): Path<String>, headers: HeaderMap) -> Response {
+    if !gitlab_authorized(&headers) || id != WIDGET {
+        return (StatusCode::NOT_FOUND, axum::Json(json!({ "message": "404 Project Not Found" }))).into_response();
+    }
+    axum::Json(json!({ "path_with_namespace": id, "default_branch": "main", "description": "A widget" })).into_response()
+}
+
+async fn gitlab_create_mr(State(gh): State<FakeGithub>, Path(id): Path<String>, headers: HeaderMap, axum::Json(body): axum::Json<Value>) -> Response {
+    if !gitlab_authorized(&headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    gh.calls.lock().unwrap().push(("POST".into(), format!("/projects/{id}/merge_requests"), body));
+    (StatusCode::CREATED, axum::Json(json!({ "iid": 3, "web_url": format!("https://gitlab.example/{id}/-/merge_requests/3") }))).into_response()
+}
+
+async fn gitlab_merge_mr(State(gh): State<FakeGithub>, Path((id, iid)): Path<(String, u64)>, axum::Json(body): axum::Json<Value>) -> Response {
+    gh.calls.lock().unwrap().push(("PUT".into(), format!("/projects/{id}/merge_requests/{iid}/merge"), body));
+    axum::Json(json!({ "state": "merged", "merge_commit_sha": "def456" })).into_response()
+}
+
+async fn git_backend(State(gh): State<FakeGithub>, Path(path): Path<String>, RawQuery(query): RawQuery, method: Method, headers: HeaderMap, body: Bytes) -> Response {
     if !authorized(&headers, "basic") {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    serve_git(&gh.root, path, query, method, headers, body).await
+}
+
+/// GitLab takes the token as the password of the `oauth2` user.
+async fn gitlab_git_backend(State(gh): State<FakeGithub>, Path(path): Path<String>, RawQuery(query): RawQuery, method: Method, headers: HeaderMap, body: Bytes) -> Response {
+    let want = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("oauth2:{GITLAB_TOKEN}")));
+    if headers.get("authorization").and_then(|v| v.to_str().ok()) != Some(want.as_str()) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    serve_git(&gh.root.join("gitlab"), path, query, method, headers, body).await
+}
+
+/// Serve the git smart-HTTP protocol by running `git http-backend` as CGI.
+async fn serve_git(root: &std::path::Path, path: String, query: Option<String>, method: Method, headers: HeaderMap, body: Bytes) -> Response {
     let mut child = tokio::process::Command::new("git")
         .arg("http-backend")
-        .env("GIT_PROJECT_ROOT", &gh.root)
+        .env("GIT_PROJECT_ROOT", root)
         .env("GIT_HTTP_EXPORT_ALL", "1")
         .env("PATH_INFO", format!("/{path}"))
         .env("REQUEST_METHOD", method.as_str())
@@ -375,6 +431,8 @@ struct Harness {
     base: String,
     http: reqwest::Client,
     github: FakeGithub,
+    /// Where the fake code hosts listen; GitLab is under `/gitlab`.
+    forge_base: String,
     mcp: FakeMcp,
     mcp_base: String,
     agent: PathBuf,
@@ -496,7 +554,7 @@ impl Harness {
         let (app, router) = hyperbeam_server::build(cfg).await.expect("server builds");
         tokio::spawn(hyperbeam_server::egress::run(app, egress_listener));
         tokio::spawn(axum::serve(listener, router).into_future());
-        Some(Harness { base, http: reqwest::Client::new(), github, mcp, mcp_base, agent, _tmp: tmp })
+        Some(Harness { base, http: reqwest::Client::new(), github, forge_base: format!("http://{gh_addr}"), mcp, mcp_base, agent, _tmp: tmp })
     }
 
     /// Set up the team and register the scripted test agent as the
@@ -560,6 +618,99 @@ fn tool_output(events: &[Value], title_contains: &str) -> String {
 }
 
 // -------------------------------------------------------------------- tests
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gitlab_projects_work_alongside_github_repositories() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    h.connect_github(&owner).await;
+    let on_offer = |catalog: &Value| catalog["grants"].as_array().unwrap().iter().any(|g| g["id"] == "gitlab:open_pr");
+
+    // GitLab's permissions exist once GitLab is connected, at its own address.
+    assert!(!on_offer(&owner.get("/grants").await));
+    let gitlab_url = format!("{}/gitlab", h.forge_base);
+    let (status, _) = owner.call(Method::PUT, "/integrations/gitlab", Some(json!({ "config": { "url": "gitlab.example" }, "secret": GITLAB_TOKEN }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let saved = owner.ok(Method::PUT, "/integrations/gitlab", Some(json!({ "config": { "url": format!("{gitlab_url}/") }, "secret": GITLAB_TOKEN }))).await;
+    assert_eq!(saved["config"]["url"], gitlab_url.as_str());
+    assert_eq!(owner.post("/integrations/gitlab/test", json!({})).await, json!({ "ok": true, "detail": "Authenticated to GitLab as hyperbeam-bot" }));
+    let catalog = owner.get("/grants").await;
+    assert!(on_offer(&catalog));
+    let open = catalog["grants"].as_array().unwrap().iter().find(|g| g["id"] == "gitlab:open_pr").unwrap();
+    assert_eq!((open["label"].as_str(), open["system_title"].as_str()), (Some("Open merge requests"), Some("GitLab")));
+
+    // A project under nested groups can only be GitLab's; a pasted address says so too.
+    let repo = owner.post("/repos", json!({ "full_name": format!("{gitlab_url}/{WIDGET}/-/issues") })).await;
+    assert_eq!(repo["repo"], json!({ "id": repo["repo"]["id"], "host": "gitlab", "full_name": WIDGET, "default_branch": "main", "description": "A widget", "created_at": repo["repo"]["created_at"] }));
+    assert_eq!(owner.call(Method::POST, "/repos", Some(json!({ "full_name": WIDGET, "host": "github" }))).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(owner.call(Method::POST, "/repos", Some(json!({ "full_name": WIDGET }))).await.0, StatusCode::CONFLICT);
+    let listed = owner.get("/repos").await;
+    let hosts: Vec<(&str, &str)> = listed["repos"].as_array().unwrap().iter().map(|r| (r["full_name"].as_str().unwrap(), r["host"].as_str().unwrap())).collect();
+    assert_eq!(hosts, [("acme/demo", "github"), (WIDGET, "gitlab")]);
+
+    // Each host has its own permissions: Mia may open merge requests on GitLab, not merge them.
+    let mia = h.member(&owner, "mia@example.com", &["github:open_pr", "gitlab:write", "gitlab:open_pr"]).await;
+    let (status, refused) = mia.call(Method::POST, "/sessions", Some(json!({ "prompt": "hi", "harness": "scripted", "repos": [WIDGET], "grants": ["github:write"] }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(refused.to_string().contains("gitlab:read"), "{refused}");
+
+    let prompt = r#"Add a note to the widget.
+!sh cd widget && git config remote.origin.url && echo hi > note.txt && git add . && git commit -qm "Add note" && git push -q origin HEAD 2>&1 && echo PUSHED
+!sh cd demo && git log --format=%s -1
+!mcp gitlab_create_merge_request {"title": "Add note", "body": "Adds note.txt", "draft": true}
+!mcp github_create_pull_request {"repo": "platform/tools/widget", "title": "Wrong host"}
+!sh cd widget && git push origin HEAD:main 2>&1; echo "exit=$?"
+!mcp gitlab_merge_merge_request {"number": 3}
+!say Opened a merge request."#;
+    let created = mia.post("/sessions", json!({ "prompt": prompt, "harness": "scripted", "repos": ["acme/demo", WIDGET], "new_workstream": "Widget note" })).await;
+    let id = created["session"]["id"].as_str().unwrap();
+    let branch = created["session"]["work_branch"].as_str().unwrap().to_string();
+    let events = mia.wait_turns(id, 1).await;
+
+    // Both checkouts came through the one proxy; each origin is on its own host.
+    let push = tool_output(&events, "git commit");
+    assert!(push.contains(&format!("{gitlab_url}/{WIDGET}.git")), "{push}");
+    assert!(push.contains("PUSHED"), "{push}");
+    assert!(h.github.gitlab_branches().contains(&branch), "branch not on GitLab: {:?}", h.github.gitlab_branches());
+    assert!(!h.github.branches().contains(&branch));
+    assert_eq!(tool_output(&events, "cd demo"), "initial");
+
+    // The merge request is opened with GitLab's own vocabulary and linked like a pull request.
+    assert!(tool_output(&events, "gitlab_create_merge_request").contains("Opened merge request !3"));
+    let calls = h.github.calls.lock().unwrap().clone();
+    let (_, _, mr) = calls.iter().find(|(m, p, _)| m == "POST" && p == &format!("/projects/{WIDGET}/merge_requests")).expect("merge request created upstream");
+    assert_eq!((mr["title"].as_str(), mr["source_branch"].as_str(), mr["target_branch"].as_str()), (Some("Draft: Add note"), Some(branch.as_str()), Some("main")));
+    assert!(mr["description"].as_str().unwrap().contains("on behalf of Mia Member"));
+    let session = mia.session(id).await;
+    assert_eq!(session["links"][0], json!({ "kind": "pull_request", "title": format!("{WIDGET}!3 Add note"), "url": format!("https://gitlab.example/{WIDGET}/-/merge_requests/3") }));
+
+    // A host's tools act only on that host's repositories.
+    let wrong = tool_output(&events, "github_create_pull_request");
+    assert!(wrong.contains("is on GitLab") && wrong.contains("gitlab_*"), "{wrong}");
+    assert!(!calls.iter().any(|(_, p, _)| p.starts_with("/repos/")), "nothing may reach GitHub: {calls:?}");
+
+    // The default branch and merging need gitlab:merge_pr; github:merge_pr would not do.
+    let denied_push = tool_output(&events, "HEAD:main");
+    assert!(denied_push.contains("403") && !denied_push.contains("exit=0"), "{denied_push}");
+    let denial = events.iter().find(|e| e["kind"] == "gateway" && e["data"]["tool"] == "git push" && e["data"]["allowed"] == false).expect("denied push is logged");
+    assert_eq!(denial["data"]["detail"], "pushing to main requires gitlab:merge_pr");
+    assert!(tool_output(&events, "gitlab_merge_merge_request").contains("Denied"));
+    assert!(!calls.iter().any(|(m, _, _)| m == "PUT"), "merge must not reach GitLab");
+
+    // Granted, the merge goes through.
+    let mia_id = mia.get("/me").await["user"]["id"].as_str().unwrap().to_string();
+    owner.ok(Method::PATCH, &format!("/users/{mia_id}"), Some(json!({ "grants": ["github:write", "gitlab:merge_pr"] }))).await;
+    let merger = mia.post("/sessions", json!({ "prompt": "Merge it.\n!mcp gitlab_merge_merge_request {\"number\": 3, \"method\": \"squash\"}", "harness": "scripted", "repos": [WIDGET] })).await;
+    let events = mia.wait_turns(merger["session"]["id"].as_str().unwrap(), 1).await;
+    assert!(tool_output(&events, "gitlab_merge_merge_request").contains("Merged !3: def456"));
+    let calls = h.github.calls.lock().unwrap().clone();
+    assert!(calls.contains(&("PUT".to_string(), format!("/projects/{WIDGET}/merge_requests/3/merge"), json!({ "squash": true }))), "{calls:?}");
+
+    // Disconnecting takes the credential, the permissions and everyone's hold on them.
+    owner.ok(Method::DELETE, "/integrations/gitlab", None).await;
+    assert!(!on_offer(&owner.get("/grants").await));
+    assert_eq!(mia.get("/me").await["user"]["grants"], json!(["github:read", "github:write"]));
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn agent_works_within_its_owners_permissions() {

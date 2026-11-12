@@ -68,7 +68,9 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
   const harnessName = mode === "workflow" ? workflow?.spec?.harness ?? defaultHarness : harness;
   const chosenHarness = harnesses.find((h) => h.name === harnessName);
   const heldGrants: GrantInfo[] = useMemo(() => allGrants.filter((g) => me.grants.includes(g.id)), [allGrants, me]);
-  const needsRead = pickedRepos.length > 0 && !grants.includes("github:read");
+  // Checking a repository out is reading from its host.
+  const missingRead = [...new Set(repos.filter((r) => pickedRepos.includes(r.full_name)).map((r) => r.host))].filter((host) => !grants.includes(`${host}:read`));
+  const needsRead = missingRead.length > 0;
   const toggle = (list: string[], value: string) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   const extrasSummary = [
     pickedSkills.length > 0 && `${pickedSkills.length} skill${pickedSkills.length > 1 ? "s" : ""}`,
@@ -281,7 +283,7 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
             <A href="/settings/harnesses" className="text-primary hover:underline">Add one in Settings</A> before starting, or pick another harness.
           </Notice>
         )}
-        {needsRead && <Notice tone="warning">Checking out repositories needs “Read repositories” (github:read), which this agent would not hold.</Notice>}
+        {needsRead && <Notice tone="warning">Checking out repositories needs “Read repositories” ({missingRead.map((host) => `${host}:read`).join(", ")}), which this agent would not hold.</Notice>}
         <ErrorNote error={action.error} />
       </div>
     </Modal>

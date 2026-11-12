@@ -239,8 +239,12 @@ export interface Harness {
   ready: boolean;
 }
 
+/** Where repositories live. Each has its own integration and permissions. */
+export type CodeHost = "github" | "gitlab";
+
 export interface Repo {
   id: string;
+  host: CodeHost;
   full_name: string;
   default_branch: string;
   description: string;

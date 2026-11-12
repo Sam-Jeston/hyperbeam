@@ -5,10 +5,10 @@
 //! receives the *intersection* of what its launching user holds and what the
 //! session asked for. Agents never hold more than the person who started them.
 //!
-//! GitHub is built in and has four levels. Every other system (Notion, and
-//! each MCP connection an admin adds) has two: `read` and `write`. Which
-//! systems exist is the control plane's business; this module only checks
-//! that a grant is well formed.
+//! Code hosts (GitHub and GitLab) are built in and have four levels. Every
+//! other system (Notion, and each MCP connection an admin adds) has two:
+//! `read` and `write`. Which systems exist is the control plane's business;
+//! this module only checks that a grant is well formed.
 
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -20,9 +20,9 @@ use std::str::FromStr;
 pub enum Level {
     Read,
     Write,
-    /// GitHub only.
+    /// Code hosts only. Open pull (or merge) requests.
     OpenPr,
-    /// GitHub only.
+    /// Code hosts only. Merge them, and push to the default branch.
     MergePr,
 }
 
@@ -45,6 +45,10 @@ pub struct Grant {
 
 /// The system name GitHub's grants use.
 pub const GITHUB: &str = "github";
+/// The system name GitLab's grants use.
+pub const GITLAB: &str = "gitlab";
+/// Systems that host repositories. Their grants have all four levels.
+pub const CODE_HOSTS: [&str; 2] = [GITHUB, GITLAB];
 /// The system name for reading the public web. It has one level, `read`.
 pub const WEB: &str = "web";
 
@@ -61,13 +65,29 @@ impl Grant {
     /// Read public web pages through the gateway's `web_fetch`.
     pub const WEB_READ: Grant = Grant::builtin(WEB, Level::Read);
 
-    pub const GITHUB_ALL: [Grant; 4] = [Grant::GITHUB_READ, Grant::GITHUB_WRITE, Grant::GITHUB_OPEN_PR, Grant::GITHUB_MERGE_PR];
+    pub const GITHUB_ALL: [Grant; 4] = Grant::all_on_host(GITHUB);
+    pub const GITLAB_ALL: [Grant; 4] = Grant::all_on_host(GITLAB);
 
     const fn builtin(system: &'static str, level: Level) -> Grant {
         Grant { system: Cow::Borrowed(system), level }
     }
 
-    /// `read` or `write` on a system other than GitHub. The name must be valid.
+    /// A grant on a code host. `host` must be one of [`CODE_HOSTS`].
+    pub const fn on_host(host: &'static str, level: Level) -> Grant {
+        Grant::builtin(host, level)
+    }
+
+    /// Every level a code host has, weakest first.
+    pub const fn all_on_host(host: &'static str) -> [Grant; 4] {
+        [
+            Grant::builtin(host, Level::Read),
+            Grant::builtin(host, Level::Write),
+            Grant::builtin(host, Level::OpenPr),
+            Grant::builtin(host, Level::MergePr),
+        ]
+    }
+
+    /// `read` or `write` on a system that is not a code host. The name must be valid.
     pub fn new(system: &str, level: Level) -> Result<Grant, UnknownGrant> {
         format!("{system}:{}", level.as_str()).parse()
     }
@@ -96,6 +116,10 @@ impl Grant {
             (GITHUB, Level::Write) => "Push branches, comment, create issues",
             (GITHUB, Level::OpenPr) => "Open pull requests",
             (GITHUB, Level::MergePr) => "Merge pull requests",
+            (GITLAB, Level::Read) => "Read repositories, issues and merge requests",
+            (GITLAB, Level::Write) => "Push branches, comment, create issues",
+            (GITLAB, Level::OpenPr) => "Open merge requests",
+            (GITLAB, Level::MergePr) => "Merge merge requests",
             (WEB, Level::Read) => "Read public web pages",
             (_, Level::Read) => "Use read tools",
             _ => "Use write tools",
@@ -134,8 +158,8 @@ impl FromStr for Grant {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let unknown = || UnknownGrant(s.to_string());
         let (system, level) = s.split_once(':').ok_or_else(unknown)?;
-        if system == GITHUB {
-            return Grant::GITHUB_ALL.into_iter().find(|g| g.level.as_str() == level).ok_or_else(unknown);
+        if let Some(host) = CODE_HOSTS.into_iter().find(|host| *host == system) {
+            return Grant::all_on_host(host).into_iter().find(|g| g.level.as_str() == level).ok_or_else(unknown);
         }
         let level = match level {
             "read" => Level::Read,
@@ -344,8 +368,11 @@ mod tests {
     }
 
     #[test]
-    fn only_github_has_extra_levels_and_names_are_checked() {
+    fn only_code_hosts_have_extra_levels_and_names_are_checked() {
         assert!("posthog:read".parse::<Grant>().is_ok());
+        assert_eq!("gitlab:merge_pr".parse::<Grant>().unwrap(), Grant::on_host(GITLAB, Level::MergePr));
+        assert_eq!("gitlab:open_pr".parse::<Grant>().unwrap().label(), "Open merge requests");
+        assert!("gitlab:admin".parse::<Grant>().is_err());
         assert!("my-mcp2:write".parse::<Grant>().is_ok());
         assert_eq!("web:read".parse::<Grant>().unwrap(), Grant::WEB_READ);
         for bad in ["web:write", "sentry:merge_pr", "Sentry:read", "my_mcp:read", "-x:read", "x-:read", "nocolon", ":read", "a:"] {

@@ -15,12 +15,12 @@ The sandbox also receives the [harness credential](/credentials#what-the-agent-c
 
 | Path | What it is for | What is checked |
 |---|---|---|
-| `/git/…` | `git clone`, `fetch`, `push` | The repository is one of the session’s. `github:read` to fetch, `github:write` to push, `github:merge_pr` to push to the default branch. |
-| `/mcp` | Tools for GitHub, connected MCP servers and the platform | The grant each tool needs, and the repository. For a connection, that an admin has cleared the tool. |
+| `/git/…` | `git clone`, `fetch`, `push` | The repository is one of the session’s. `github:read` to fetch, `github:write` to push, `github:merge_pr` to push to the default branch (`gitlab:…` for a repository on GitLab). |
+| `/mcp` | Tools for GitHub, GitLab, connected MCP servers and the platform | The grant each tool needs, and the repository. For a connection, that an admin has cleared the tool. |
 | `/mcp` `web_fetch` | Reading public web pages | The session holds `web:read`, the URL is one the agent may fetch, and the address is on the public internet. See [Web access](#web-access). |
 | Egress proxy | Everything else on the network | The host is on the allowlist. |
 
-GitHub and connection credentials, including the tokens from an OAuth sign-in, stay in the control plane. The git proxy and tool gateway add them to requests they have checked; the agent never sees them. Connected MCP servers are called by the control plane, not the sandbox, so they need no place on the egress allowlist.
+GitHub, GitLab and connection credentials, including the tokens from an OAuth sign-in, stay in the control plane. The git proxy and tool gateway add them to requests they have checked; the agent never sees them. Connected MCP servers are called by the control plane, not the sandbox, so they need no place on the egress allowlist.
 
 A custom connection’s tools are hidden until an admin approves each one, and hidden again if the server changes one afterwards. See [Custom connections](/integrations#custom-connections).
 

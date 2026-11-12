@@ -7,10 +7,10 @@ import { Field, Input, Textarea } from "../components/ui/input";
 import { LinkTabs } from "../components/ui/menu";
 import { Select } from "../components/ui/select";
 import { Badge, Card, EmptyState, Notice, Skeleton } from "../components/ui/surface";
-import { api, type CredentialSlot, type Harness, modelLabel, type Repo } from "../lib/api";
+import { api, type CodeHost, type CredentialSlot, type Harness, modelLabel, type Repo } from "../lib/api";
 import { refreshMe, useStore } from "../lib/store";
 import { Connections } from "./Connections";
-import { A, CopyField, ErrorNote, navigate, Page, PageHeader, Time, useAction, useDocumentTitle, useLoad } from "../lib/ui";
+import { A, CopyField, ErrorNote, navigate, Page, PageHeader, systemName, Time, useAction, useDocumentTitle, useLoad } from "../lib/ui";
 
 const TABS: { value: string; label: string; adminOnly: boolean }[] = [
   { value: "integrations", label: "Integrations", adminOnly: false },
@@ -57,15 +57,25 @@ function CardsSkeleton({ n = 3 }: { n?: number }) {
 // -------------------------------------------------------------- integrations
 
 interface Integration {
-  kind: "github";
+  kind: CodeHost;
   connected: boolean;
-  config: { mode?: string; app_id?: string };
+  /** GitHub: how it authenticates. GitLab: where the instance lives. */
+  config: { mode?: string; app_id?: string; url?: string };
   updated_at?: string;
 }
 
-const INTEGRATION_COPY: Record<string, { title: string; blurb: string; tile: string }> = {
+const GITLAB_COM = "https://gitlab.com";
+
+const INTEGRATION_COPY: Record<CodeHost, { title: string; blurb: string; tile: string }> = {
   github: { title: "GitHub", blurb: "Lets agents clone and push to registered repositories, and work with issues and pull requests.", tile: "G" },
+  gitlab: { title: "GitLab", blurb: "Lets agents clone and push to registered projects, and work with issues and merge requests. gitlab.com or your own instance.", tile: "L" },
 };
+
+/** How a connected integration is set up, in a few words. */
+function integrationDetail({ kind, config }: Integration): string {
+  if (kind === "github") return config.mode === "app" ? `GitHub App ${config.app_id}` : "Access token";
+  return (config.url ?? GITLAB_COM).replace(/^https?:\/\//, "");
+}
 
 function Integrations({ isAdmin }: { isAdmin: boolean }) {
   const { data, error, reload } = useLoad<{ integrations: Integration[] }>(() => api.get("/integrations"), []);
@@ -102,9 +112,7 @@ function Integrations({ isAdmin }: { isAdmin: boolean }) {
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="font-display text-[15.5px] font-semibold">{copy.title}</h2>
                     {integration.connected ? <Badge tone="run"><span className="size-1.5 rounded-full bg-run" />Connected</Badge> : <Badge>Not connected</Badge>}
-                    {integration.connected && integration.kind === "github" && (
-                      <Badge tone="outline">{integration.config.mode === "app" ? `GitHub App ${integration.config.app_id}` : "Access token"}</Badge>
-                    )}
+                    {integration.connected && <Badge tone="outline">{integrationDetail(integration)}</Badge>}
                   </div>
                   <p className="mt-0.5 text-[13px] text-muted">{copy.blurb}</p>
                 </div>
@@ -129,13 +137,14 @@ function Integrations({ isAdmin }: { isAdmin: boolean }) {
 function IntegrationDialog({ integration, onClose }: { integration: Integration; onClose: () => void }) {
   const [mode, setMode] = useState(integration.config.mode ?? "token");
   const [appId, setAppId] = useState(integration.config.app_id ?? "");
+  const [url, setUrl] = useState(integration.config.url ?? GITLAB_COM);
   const [secret, setSecret] = useState("");
   const action = useAction();
   const { kind } = integration;
   const title = INTEGRATION_COPY[kind].title;
   const save = () =>
     action.run(async () => {
-      await api.put(`/integrations/${kind}`, { config: kind === "github" ? { mode, app_id: appId } : {}, secret: secret || undefined });
+      await api.put(`/integrations/${kind}`, { config: kind === "github" ? { mode, app_id: appId } : { url }, secret: secret || undefined });
       onClose();
     }, { success: `${title} ${integration.connected ? "updated" : "connected"}` });
   const disconnect = async () => {
@@ -179,6 +188,16 @@ function IntegrationDialog({ integration, onClose }: { integration: Integration;
           {isApp && <Field label="App ID">{(id) => <Input id={id} mono value={appId} onChange={(e) => setAppId(e.target.value)} />}</Field>}
         </>
       )}
+      {kind === "gitlab" && (
+        <>
+          <Field label="GitLab address" hint="Change this only if your team runs its own GitLab.">
+            {(id) => <Input id={id} mono value={url} onChange={(e) => setUrl(e.target.value)} placeholder={GITLAB_COM} />}
+          </Field>
+          <p className="text-[13px] text-muted">
+            A project, group or personal access token with the <span className="font-mono text-[12.5px]">api</span> and <span className="font-mono text-[12.5px]">write_repository</span> scopes and at least the Developer role (Maintainer if agents should merge or push to protected branches). Prefer a project or group token limited to what you will register: everything agents do on GitLab will appear as this token’s user.
+          </p>
+        </>
+      )}
       <Field
         label={isApp ? "Private key (PEM)" : "Token"}
         hint={integration.connected ? "Leave blank to keep the current one. Stored encrypted and never shown again." : "Stored encrypted and never shown again."}
@@ -200,9 +219,14 @@ function IntegrationDialog({ integration, onClose }: { integration: Integration;
 
 function Repositories({ isAdmin }: { isAdmin: boolean }) {
   const { data, error, reload } = useLoad<{ repos: Repo[] }>(() => api.get("/repos"), []);
+  const integrations = useLoad<{ integrations: Integration[] }>(() => api.get("/integrations"), []);
   const [name, setName] = useState("");
+  const [picked, setPicked] = useState<CodeHost | "">("");
   const action = useAction();
-  const add = () => name.trim() && action.run(async () => (await api.post("/repos", { full_name: name.trim() }), setName(""), reload()), { success: `Registered ${name.trim()}` });
+  // Offer a choice of host only when there is one to make.
+  const connected = (integrations.data?.integrations ?? []).filter((i) => i.connected).map((i) => i.kind);
+  const host = picked || connected[0] || "github";
+  const add = () => name.trim() && action.run(async () => (await api.post("/repos", { full_name: name.trim(), host }), setName(""), reload()), { success: `Registered ${name.trim()}` });
   const remove = async (repo: Repo) => {
     const ok = await confirm({
       title: `Remove ${repo.full_name}?`,
@@ -218,8 +242,11 @@ function Repositories({ isAdmin }: { isAdmin: boolean }) {
         Agents can only reach repositories registered here, and only the ones their owner has access to (see <A href="/team" className="text-primary hover:underline">People &amp; permissions</A>).
       </Lead>
       {isAdmin && (
-        <form className="mb-5 flex max-w-[560px] gap-2" onSubmit={(e) => (e.preventDefault(), void add())}>
-          <Input mono aria-label="Repository" placeholder="owner/name" value={name} onChange={(e) => setName(e.target.value)} />
+        <form className="mb-5 flex max-w-[640px] gap-2" onSubmit={(e) => (e.preventDefault(), void add())}>
+          {connected.length > 1 && (
+            <Select className="w-[130px] shrink-0" aria-label="Code host" value={host} onValueChange={(v) => setPicked(v as CodeHost)} options={connected.map((kind) => ({ value: kind, label: INTEGRATION_COPY[kind].title }))} />
+          )}
+          <Input mono aria-label="Repository" placeholder={host === "gitlab" ? "group/project" : "owner/name"} value={name} onChange={(e) => setName(e.target.value)} />
           <Button type="submit" variant="primary" disabled={!name.trim()} loading={action.busy}>{action.busy ? "Checking" : <><Plus /> Register</>}</Button>
         </form>
       )}
@@ -228,7 +255,7 @@ function Repositories({ isAdmin }: { isAdmin: boolean }) {
         {!data && !error && <CardsSkeleton n={2} />}
         {data && data.repos.length === 0 && (
           <EmptyState icon={<FolderGit2 />} title="No repositories yet">
-            {isAdmin ? <>Connect GitHub under <A href="/settings/integrations" className="text-primary hover:underline">Integrations</A>, then register a repository as owner/name.</> : "Ask an admin to register a repository."}
+            {isAdmin ? <>Connect GitHub or GitLab under <A href="/settings/integrations" className="text-primary hover:underline">Integrations</A>, then register a repository as owner/name.</> : "Ask an admin to register a repository."}
           </EmptyState>
         )}
         {data && data.repos.length > 0 && (
@@ -240,6 +267,7 @@ function Repositories({ isAdmin }: { isAdmin: boolean }) {
                   <div className="font-mono text-[13px] font-medium">{repo.full_name}</div>
                   {repo.description && <div className="truncate text-[12.5px] text-muted">{repo.description}</div>}
                 </div>
+                {(connected.length > 1 || repo.host !== "github") && <Badge tone="outline">{systemName(repo.host)}</Badge>}
                 <Badge tone="outline" mono>{repo.default_branch}</Badge>
                 {repo.accessible ? <Badge tone="run">You have access</Badge> : <Badge><Lock /> No access</Badge>}
                 {isAdmin && <Button variant="ghost" size="icon-sm" aria-label={`Remove ${repo.full_name}`} onClick={() => void remove(repo)}><Trash2 /></Button>}

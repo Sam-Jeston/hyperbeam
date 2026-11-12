@@ -5,13 +5,14 @@ description: How Hyperbeam is tested, and the limits to know about.
 
 ## Automated tests
 
-The end-to-end tests start a real server, real runner processes driving a scripted ACP agent, and a fake GitHub that serves the git smart-HTTP protocol. They cover:
+The end-to-end tests start a real server, real runner processes driving a scripted ACP agent, and a fake GitHub and GitLab that serve the git smart-HTTP protocol. They cover:
 
 - the permission model;
 - sign-up, invites and roles;
 - the full session lifecycle through the runner and ACP;
 - cloning and pushing through the git proxy, including default-branch protection;
 - opening pull requests through the gateway;
+- GitLab alongside GitHub: a project under nested groups, its own permissions, and opening and merging merge requests;
 - MCP connections against fake upstream servers: tool review, grants, read calls through a read-only variant, changed tools hidden again, and permissions removed on disconnect;
 - connecting by OAuth against a fake authorization server: discovery, client registration, PKCE, and renewing a token the server has revoked;
 - denial and audit of what is not permitted;

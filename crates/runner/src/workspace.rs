@@ -7,21 +7,46 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-/// Environment that routes git through the control plane's proxy. No GitHub
-/// credential ever enters the sandbox: the proxy holds it and checks every
-/// fetch and push against the session's grants.
+/// The ways a repository under `host_url` can be addressed: over HTTPS and,
+/// for the same host name, over SSH.
+fn host_prefixes(host_url: &str) -> Vec<String> {
+    let web = format!("{}/", host_url.trim_end_matches('/'));
+    let mut prefixes = vec![web.clone()];
+    let rest = web.split_once("://").map(|(_, rest)| rest).unwrap_or(&web);
+    if let Some((authority, path)) = rest.split_once('/') {
+        let name = authority.rsplit('@').next().unwrap_or(authority);
+        let name = name.split(':').next().unwrap_or(name);
+        if !name.is_empty() {
+            prefixes.push(format!("git@{name}:{path}"));
+            prefixes.push(format!("ssh://git@{name}/{path}"));
+        }
+    }
+    prefixes
+}
+
+/// Environment that routes git through the control plane's proxy. No code
+/// host credential ever enters the sandbox: the proxy holds it and checks
+/// every fetch and push against the session's grants.
 pub fn git_env(spec: &RunSpec, token: &str) -> BTreeMap<String, String> {
     let base = format!("{}/", spec.git_base_url.trim_end_matches('/'));
-    let entries = [
-        (format!("http.{base}.extraHeader"), format!("Authorization: Bearer {token}")),
-        (format!("url.{base}.insteadOf"), "https://github.com/".to_string()),
-        (format!("url.{base}.insteadOf"), "git@github.com:".to_string()),
-        (format!("url.{base}.insteadOf"), "ssh://git@github.com/".to_string()),
+    let mut hosts = vec!["https://github.com".to_string()];
+    for repo in &spec.repos {
+        if !hosts.iter().any(|h| h.trim_end_matches('/') == repo.host_url.trim_end_matches('/')) {
+            hosts.push(repo.host_url.clone());
+        }
+    }
+    let mut entries = vec![(format!("http.{base}.extraHeader"), format!("Authorization: Bearer {token}"))];
+    for host in &hosts {
+        for prefix in host_prefixes(host) {
+            entries.push((format!("url.{base}.insteadOf"), prefix));
+        }
+    }
+    entries.extend([
         ("user.name".to_string(), spec.git_user_name.clone()),
         ("user.email".to_string(), spec.git_user_email.clone()),
         ("init.defaultBranch".to_string(), "main".to_string()),
         ("advice.detachedHead".to_string(), "false".to_string()),
-    ];
+    ]);
     let mut env = BTreeMap::new();
     env.insert("GIT_CONFIG_COUNT".to_string(), entries.len().to_string());
     for (i, (key, value)) in entries.into_iter().enumerate() {
@@ -56,7 +81,7 @@ pub async fn checkout_repo(
     env: &BTreeMap<String, String>,
 ) -> Result<String> {
     let dir = root.join(repo.dir_name());
-    let url = format!("https://github.com/{}.git", repo.full_name);
+    let url = repo.clone_url();
     if !dir.join(".git").exists() {
         git(root, env, &["clone", "--quiet", &url, repo.dir_name()]).await?;
     }
@@ -103,6 +128,15 @@ pub async fn write_skills(root: &Path, skills: &[SkillSpec]) -> Result<Vec<PathB
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hosts_are_addressed_over_https_and_ssh() {
+        assert_eq!(host_prefixes("https://github.com"), ["https://github.com/", "git@github.com:", "ssh://git@github.com/"]);
+        assert_eq!(
+            host_prefixes("https://git.acme.dev:8443/gitlab/"),
+            ["https://git.acme.dev:8443/gitlab/", "git@git.acme.dev:gitlab/", "ssh://git@git.acme.dev/gitlab/"]
+        );
+    }
 
     #[test]
     fn skill_gets_frontmatter_once() {

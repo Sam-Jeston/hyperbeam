@@ -61,7 +61,7 @@ Which pages agents may read is set under **Settings → General**. See [Web acce
 
 ## Integrations
 
-These point Hyperbeam at the services’ APIs. Change them only for testing or a self-hosted GitHub.
+These point Hyperbeam at the services’ APIs. Change them only for testing or a self-hosted GitHub. A self-hosted GitLab’s address is set where GitLab is connected, under **Settings → Integrations**.
 
 | Variable | Default |
 |---|---|

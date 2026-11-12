@@ -52,12 +52,26 @@ pub struct HarnessSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoSpec {
-    /// `owner/name`
+    /// `owner/name`, or a longer path where the host nests groups.
     pub full_name: String,
     pub default_branch: String,
+    /// Where the repository's host lives on the web, e.g. `https://gitlab.com`.
+    /// The checkout's `origin` is under it; git reaches it through the proxy.
+    #[serde(default = "github_url")]
+    pub host_url: String,
+}
+
+fn github_url() -> String {
+    "https://github.com".to_string()
 }
 
 impl RepoSpec {
+    /// The URL `origin` points at.
+    pub fn clone_url(&self) -> String {
+        format!("{}/{}.git", self.host_url.trim_end_matches('/'), self.full_name)
+    }
+
+
     /// Directory name inside the workspace.
     pub fn dir_name(&self) -> &str {
         self.full_name.rsplit('/').next().unwrap_or(&self.full_name)
@@ -191,7 +205,11 @@ mod tests {
 
     #[test]
     fn repo_dir_name() {
-        let r = RepoSpec { full_name: "acme/api".into(), default_branch: "main".into() };
+        let r: RepoSpec = serde_json::from_value(serde_json::json!({ "full_name": "acme/api", "default_branch": "main" })).unwrap();
         assert_eq!(r.dir_name(), "api");
+        assert_eq!(r.clone_url(), "https://github.com/acme/api.git");
+        let nested = RepoSpec { full_name: "acme/platform/api".into(), default_branch: "main".into(), host_url: "https://git.acme.dev/".into() };
+        assert_eq!(nested.dir_name(), "api");
+        assert_eq!(nested.clone_url(), "https://git.acme.dev/acme/platform/api.git");
     }
 }

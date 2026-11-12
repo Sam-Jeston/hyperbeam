@@ -395,18 +395,24 @@ pub async fn delete(State(app): State<App>, actor: AuthUser, Path(name): Path<St
     oauth::delete_secrets(&app.db, &name).await?;
     app.mcp.reset();
     // A later connection of the same name must not inherit this one's grants.
+    revoke_system(&app, &name).await?;
+    app.activity(Some(actor.0.id), None, None, "integration.disconnected", &format!("{} disconnected {}", actor.0.name, conn.title), json!({ "connection": name })).await;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Take every grant on `system` away from everyone, invited or joined.
+pub async fn revoke_system(app: &App, system: &str) -> ApiResult<()> {
     for table in ["users", "invites"] {
         let rows: Vec<(uuid::Uuid, SqlJson<GrantSet>)> = sqlx::query_as(&format!("SELECT id, grants FROM {table}")).fetch_all(&app.db).await?;
         for (id, SqlJson(mut grants)) in rows {
             let before = grants.clone();
-            grants.remove_system(&name);
+            grants.remove_system(system);
             if grants != before {
                 sqlx::query(&format!("UPDATE {table} SET grants = $2 WHERE id = $1")).bind(id).bind(json!(grants)).execute(&app.db).await?;
             }
         }
     }
-    app.activity(Some(actor.0.id), None, None, "integration.disconnected", &format!("{} disconnected {}", actor.0.name, conn.title), json!({ "connection": name })).await;
-    Ok(Json(json!({ "ok": true })))
+    Ok(())
 }
 
 /// Ask the server again what it offers.

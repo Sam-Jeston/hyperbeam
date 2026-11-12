@@ -1,18 +1,21 @@
 //! The tool gateway: an MCP server (streamable HTTP, JSON responses) that is
-//! the only way an agent can act on GitHub, the MCP connections an admin has
+//! the only way an agent can act on a code host (GitHub, GitLab), the MCP
+//! connections an admin has
 //! added (Notion, Linear and the like), or the platform.
 //!
 //! Every call is authenticated by the session's run token, checked against
 //! the session's grants, audited, and shown in the session log.
 
 mod github;
+mod gitlab;
 mod platform;
 pub mod web;
 
 use crate::app::App;
 use crate::auth::bearer;
 use crate::connections::{self, Connection, ToolLevel};
-use crate::store::{self, Session};
+use crate::integrations::Host;
+use crate::store::{self, Link, Session};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -115,6 +118,7 @@ pub fn arg_list(args: &Value, name: &str) -> Vec<String> {
 fn catalog() -> Vec<ToolDef> {
     let mut tools = platform::tools();
     tools.extend(github::tools());
+    tools.extend(gitlab::tools());
     tools.extend(web::tools());
     tools
 }
@@ -252,27 +256,77 @@ async fn call_tool(app: &App, session: &Session, name: &str, args: &Value) -> To
     }
     match name.split('_').next() {
         Some("github") => github::call(app, session, name, args).await,
+        Some("gitlab") => gitlab::call(app, session, name, args).await,
         Some("web") => web::call(app, session, name, args).await,
         _ => platform::call(app, session, name, args).await,
     }
 }
 
-/// A repository argument must be one of the session's own repositories.
-pub fn session_repo(session: &Session, args: &Value) -> Result<String, ToolError> {
+/// A repository argument must be one of the session's own repositories, and
+/// on the host whose tool was called.
+pub async fn session_repo(app: &App, session: &Session, args: &Value, host: Host) -> Result<String, ToolError> {
+    let mut here = Vec::new();
+    for repo in session.repos.iter() {
+        if app.repo_host(repo).await? == host {
+            here.push(repo.clone());
+        }
+    }
     let wanted = match arg_opt(args, "repo") {
         Some(repo) => repo.to_string(),
-        None if session.repos.len() == 1 => session.repos[0].clone(),
-        None => return Err(ToolError::Failed("missing required argument `repo` (owner/name)".into())),
+        None if here.len() == 1 => here[0].clone(),
+        None => return Err(ToolError::Failed("missing required argument `repo`".into())),
     };
-    session
-        .repos
-        .iter()
-        .find(|r| r.eq_ignore_ascii_case(&wanted))
-        .cloned()
-        .ok_or_else(|| {
-            let have = if session.repos.is_empty() { "it has none".to_string() } else { session.repos.join(", ") };
-            ToolError::Denied(format!("`{wanted}` is not one of this session's repositories ({have})"))
-        })
+    if let Some(found) = here.iter().find(|r| r.eq_ignore_ascii_case(&wanted)) {
+        return Ok(found.clone());
+    }
+    if session.repos.iter().any(|r| r.eq_ignore_ascii_case(&wanted)) {
+        let other = app.repo_host(&wanted).await?;
+        return Err(ToolError::Failed(format!("`{wanted}` is on {}, not {}: use the `{}_*` tools for it", other.title(), host.title(), other.kind())));
+    }
+    let have = if here.is_empty() { format!("it has none on {}", host.title()) } else { here.join(", ") };
+    Err(ToolError::Denied(format!("`{wanted}` is not one of this session's repositories ({have})")))
+}
+
+/// A string inside a host's reply, or nothing.
+fn s<'a>(value: &'a Value, pointer: &str) -> &'a str {
+    value.pointer(pointer).and_then(Value::as_str).unwrap_or("")
+}
+
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        format!("{}… [truncated]", text.chars().take(max).collect::<String>())
+    }
+}
+
+/// Record a link on the session and its workstream, so the team can find it.
+async fn attach_link(app: &App, session: &Session, link: &Link) {
+    let value = json!([link]);
+    sqlx::query("UPDATE sessions SET links = links || $2 WHERE id = $1 AND NOT links @> $2")
+        .bind(session.id)
+        .bind(&value)
+        .execute(&app.db)
+        .await
+        .ok();
+    app.publish_session(session.id).await;
+    if let Some(ws) = session.workstream_id {
+        sqlx::query("UPDATE workstreams SET links = links || $2, updated_at = now() WHERE id = $1 AND NOT links @> $2")
+            .bind(ws)
+            .bind(&value)
+            .execute(&app.db)
+            .await
+            .ok();
+        if link.kind == "pull_request" {
+            // A pull request means people are up next.
+            sqlx::query("UPDATE workstreams SET status = 'review' WHERE id = $1 AND status IN ('scoping', 'building')")
+                .bind(ws)
+                .execute(&app.db)
+                .await
+                .ok();
+        }
+        app.publish("workstream", None, json!({ "id": ws }));
+    }
 }
 
 fn rpc_result(id: Value, result: Value) -> Response {
@@ -307,7 +361,7 @@ pub async fn handle(State(app): State<App>, parts: Parts, Json(request): Json<Va
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false } },
                     "serverInfo": { "name": "hyperbeam", "title": "Hyperbeam", "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": "Tools for acting on GitHub, the team's connected services, the web and the Hyperbeam platform. \
+                    "instructions": "Tools for acting on the team's code host (GitHub or GitLab), its connected services, the web and the Hyperbeam platform. \
                                      A connected service's tools are named after it, e.g. `sentry_search_issues`. \
                                      Calls are checked against this session's permissions and are visible to the team.",
                 }),

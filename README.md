@@ -13,8 +13,8 @@ its own sandbox, and everyone can watch the scoping and the building as it happe
 - **Any harness.** Claude Code, Codex, Gemini CLI, OpenCode, or anything else that speaks the
   [Agent Client Protocol](https://agentclientprotocol.com). Bring a team API key or your own credential.
 - **Permissions that belong to people.** An agent can do only what the person who started it may:
-  GitHub (read, write, open PR, merge PR) and each connected MCP service (read, write), per repository.
-- **Agents never hold your credentials.** GitHub and connected MCP services (Linear, Notion, PostHog, Sentry, or your own) are reached through Hyperbeam's tool
+  GitHub or GitLab (read, write, open PR, merge PR) and each connected MCP service (read, write), per repository.
+- **Agents never hold your credentials.** GitHub, GitLab and connected MCP services (Linear, Notion, PostHog, Sentry, or your own) are reached through Hyperbeam's tool
   gateway and git proxy, which check every request and record it.
 - **A conductor.** One agent that scopes a request, starts worker agents across repositories, and is
   told when each reports back.
@@ -42,8 +42,8 @@ runner dials out to the control plane; nothing connects in. That token is what t
 
 | Path | What it is for | What is checked |
 |---|---|---|
-| `/git/…` | `git clone`, `fetch`, `push` | repository is one of the session's; `github:read` to fetch, `github:write` to push, `github:merge_pr` to push to the default branch |
-| `/mcp` | tools for GitHub, connected MCP servers and the platform | the grant each tool needs, the repository, and for connections that an admin cleared the tool |
+| `/git/…` | `git clone`, `fetch`, `push` | repository is one of the session's; `github:read` to fetch, `github:write` to push, `github:merge_pr` to push to the default branch (`gitlab:…` on GitLab) |
+| `/mcp` | tools for GitHub, GitLab, connected MCP servers and the platform | the grant each tool needs, the repository, and for connections that an admin cleared the tool |
 | `/mcp` `web_fetch` | reading public web pages | `web:read`; the URL is one a person gave the agent, a search returned or a fetched page links to; the address is public |
 | egress proxy | everything else on the network | host is on the allowlist |
 
@@ -154,7 +154,7 @@ resumed with a message, in a fresh sandbox, from the branch it pushed.
 
 ## Setting up a team
 
-1. **Connect GitHub** (*Settings → Integrations*). Use a GitHub App for an organisation: Hyperbeam then
+1. **Connect GitHub or GitLab** (*Settings → Integrations*). On GitHub, use a GitHub App for an organisation: Hyperbeam then
    mints a short-lived token per repository per request. A fine-grained access token works for one person.
 2. **Register repositories** (*Settings → Repositories*). Agents can reach only these.
 3. **Give a harness a credential** (*Settings → Harnesses*): a team API key, or each person's own.
@@ -170,6 +170,7 @@ resumed with a message, in a fresh sandbox, from the branch it pushed.
 | `github:write` | push branches (not the default branch); comment; create issues |
 | `github:open_pr` | open pull requests |
 | `github:merge_pr` | merge pull requests; push to the default branch |
+| `gitlab:read` … `gitlab:merge_pr` | the same four on GitLab, where pull requests are merge requests |
 | `<connection>:read` / `<connection>:write` | use a connection's read / write tools, e.g. `linear:write`, `notion:read` |
 
 A session's grants are fixed at launch to what its owner holds, optionally narrowed, and are narrowed
@@ -277,7 +278,7 @@ HYPERBEAM_TEST_DATABASE_URL=postgres://hyperbeam:hyperbeam@127.0.0.1:5440/postgr
 ```
 
 The end-to-end tests start a real server, real runner processes driving a scripted ACP agent
-(`crates/test-agent`, not shipped), and a fake GitHub that serves the git
+(`crates/test-agent`, not shipped), and a fake GitHub and GitLab that serve the git
 smart-HTTP protocol, and need Postgres; without `HYPERBEAM_TEST_DATABASE_URL` they are skipped.
 
 | Path | Contents |

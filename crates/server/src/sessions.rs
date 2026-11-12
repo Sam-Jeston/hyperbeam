@@ -4,12 +4,13 @@
 use crate::app::App;
 use crate::crypto;
 use crate::error::{ApiError, ApiResult};
+use crate::integrations::Host;
 use crate::sandbox::LaunchRequest;
 use crate::store::{self, Event, Harness, Question, Session, User};
 use anyhow::{Context, Result, anyhow};
 use hyperbeam_core::protocol::{HarnessSpec, RepoSpec, RunSpec, RunnerMsg, ServerMsg, SessionStatus, SkillSpec, event};
 use hyperbeam_core::workflow::SessionRole;
-use hyperbeam_core::{Grant, GrantSet};
+use hyperbeam_core::{Grant, GrantSet, Level};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 use sqlx::types::Json;
@@ -283,14 +284,19 @@ impl App {
             if !scope.allows(&repo.full_name) {
                 return Err(ApiError::forbidden(format!("you do not have access to `{}`", repo.full_name)));
             }
+            // Checking a repository out is reading from its host.
+            let host = Host::parse(&repo.host).unwrap_or(Host::Github);
+            let read = host.grant(Level::Read);
+            if !grants.has(&read) {
+                return Err(ApiError::forbidden(format!(
+                    "this session would not be allowed to read {} ({read}), so it cannot check out `{}`",
+                    host.title(),
+                    repo.full_name
+                )));
+            }
             if !repos.contains(&repo.full_name) {
                 repos.push(repo.full_name);
             }
-        }
-        if !repos.is_empty() && !grants.has(&Grant::GITHUB_READ) {
-            return Err(ApiError::forbidden(
-                "this session would not be allowed to read GitHub (github:read), so it cannot check out repositories",
-            ));
         }
 
         let mut skills = Vec::new();
@@ -643,9 +649,15 @@ impl App {
         self.proxy_env(token, &mut env);
 
         let mut repos = Vec::new();
+        let mut hosts = Vec::new();
         for name in &session.repos.0 {
             if let Some(repo) = store::repo_by_name(&self.db, name).await? {
-                repos.push(RepoSpec { full_name: repo.full_name, default_branch: repo.default_branch });
+                let host = Host::parse(&repo.host).unwrap_or(Host::Github);
+                let host_url = self.host_web_url(host).await?;
+                repos.push(RepoSpec { full_name: repo.full_name, default_branch: repo.default_branch, host_url });
+                if !hosts.contains(&host) {
+                    hosts.push(host);
+                }
             }
         }
         let skills: Vec<SkillSpec> = sqlx::query_as::<_, (String, String, String)>(
@@ -658,7 +670,7 @@ impl App {
         .map(|(name, description, content)| SkillSpec { name, description, content })
         .collect();
 
-        let preamble = self.preamble(session, &user, &repos, &skills).await?;
+        let preamble = self.preamble(session, &user, &repos, &hosts, &skills).await?;
         let base = self.cfg.internal_url.trim_end_matches('/');
         Ok(RunSpec {
             session_id: session.id,
@@ -676,7 +688,7 @@ impl App {
         })
     }
 
-    async fn preamble(&self, session: &Session, user: &User, repos: &[RepoSpec], skills: &[SkillSpec]) -> Result<String> {
+    async fn preamble(&self, session: &Session, user: &User, repos: &[RepoSpec], hosts: &[Host], skills: &[SkillSpec]) -> Result<String> {
         let mut p = String::new();
         p.push_str(&format!(
             "You are an agent running on Hyperbeam, a platform where a team's agent work is visible to everyone on the team. \
@@ -720,15 +732,20 @@ impl App {
             p.push_str(
                 "Commit to that branch and `git push origin HEAD` when you have something worth keeping; \
                  the sandbox is ephemeral and unpushed work is lost when it is torn down. \
-                 Plain `git` works and is already authenticated. There is no `gh` CLI and no GitHub token: \
-                 use the `github_*` tools for pull requests, issues and comments.\n",
+                 Plain `git` works and is already authenticated.",
             );
+            for host in hosts {
+                let (title, kind, change) = (host.title(), host.kind(), host.change_request());
+                let cli = if *host == Host::Github { "`gh`" } else { "`glab`" };
+                p.push_str(&format!(" There is no {cli} CLI and no {title} token: use the `{kind}_*` tools for {change}s, issues and comments."));
+            }
+            p.push('\n');
         }
 
         p.push_str("\n## What you may do\n");
         let grants = &session.grants.0;
         if grants.is_empty() {
-            p.push_str("You have no access to GitHub or any other connected service in this session.\n");
+            p.push_str("You have no access to the team's code host or any other connected service in this session.\n");
         } else {
             let catalog = self.grant_catalog().await?;
             for grant in grants.iter() {

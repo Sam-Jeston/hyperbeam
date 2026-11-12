@@ -5,7 +5,7 @@ description: From a fresh installation to a team that can start agents, in five 
 
 The first person to open a new installation creates the team and becomes its **owner**. Then:
 
-1. **Connect GitHub** under **Settings → Integrations**. Use a GitHub App for an organisation: Hyperbeam then mints a short-lived token per repository per request. A fine-grained access token works for one person. See [Integrations](/integrations).
+1. **Connect GitHub or GitLab** under **Settings → Integrations**. On GitHub, use a GitHub App for an organisation: Hyperbeam then mints a short-lived token per repository per request. A fine-grained access token works for one person. On GitLab, use a project or group access token. See [Integrations](/integrations).
 2. **Register repositories** under **Settings → Repositories**, as `owner/name`. Agents can reach only these.
 3. **Give a harness a credential** under **Settings → Harnesses**: a team API key, or each person’s own. See [Credentials](/credentials).
 4. **Invite people** from **People & permissions**, and tick what each person’s agents may do. See [People and permissions](/permissions).

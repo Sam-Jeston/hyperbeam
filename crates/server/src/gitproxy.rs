@@ -2,12 +2,12 @@
 //!
 //! Sandboxes clone and push through here. The proxy authenticates the
 //! session by its run token, checks the repository and the operation against
-//! the session's grants, and only then forwards to GitHub with a credential
-//! the sandbox never sees.
+//! the session's grants, and only then forwards to the repository's host
+//! (GitHub or GitLab) with a credential the sandbox never sees.
 
 use crate::app::App;
 use crate::auth::bearer;
-use crate::integrations::github::Access;
+use crate::integrations::Access;
 use crate::store::{self, Session};
 use axum::body::Body;
 use axum::extract::{Path, RawQuery, State};
@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Response};
 use base64::Engine;
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
-use hyperbeam_core::Grant;
+use hyperbeam_core::Level;
 use hyperbeam_core::protocol::event;
 use serde_json::json;
 
@@ -93,15 +93,14 @@ fn deny(status: StatusCode, message: impl Into<String>) -> Response {
     (status, [(header::CONTENT_TYPE, "text/plain")], message.into()).into_response()
 }
 
-/// Split `owner/repo(.git)/rest` and validate the repository name.
+/// Split `owner/repo(.git)/rest` and validate the repository name. The
+/// repository may sit under nested groups, so it is found from the end: the
+/// smart-HTTP protocol only ever asks for these three things.
 fn split_path(path: &str) -> Option<(String, &str)> {
-    let mut parts = path.splitn(3, '/');
-    let owner = parts.next()?;
-    let name = parts.next()?;
-    let rest = parts.next()?;
-    let name = name.strip_suffix(".git").unwrap_or(name);
-    let repo = format!("{owner}/{name}");
-    hyperbeam_core::workflow::valid_repo(&repo).then_some((repo, rest))
+    let rest = ["info/refs", "git-upload-pack", "git-receive-pack"].into_iter().find(|rest| path.ends_with(&format!("/{rest}")))?;
+    let repo = &path[..path.len() - rest.len() - 1];
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
+    hyperbeam_core::workflow::valid_repo(repo).then(|| (repo.to_string(), &path[path.len() - rest.len()..]))
 }
 
 async fn record(app: &App, session: &Session, action: &str, target: &str, allowed: bool, detail: &str) {
@@ -134,7 +133,9 @@ pub async fn handle(
         Ok(None) => return deny(StatusCode::UNAUTHORIZED, "this session has ended; its git access is revoked\n"),
         Err(_) => return deny(StatusCode::INTERNAL_SERVER_ERROR, "hyperbeam: internal error\n"),
     };
-    let Some((repo, rest)) = split_path(&path) else { return deny(StatusCode::NOT_FOUND, "not a repository path\n") };
+    let Some((repo, rest)) = split_path(&path) else {
+        return deny(StatusCode::NOT_FOUND, "hyperbeam proxies the git smart HTTP protocol only, for owner/name repositories\n");
+    };
 
     let query = query.unwrap_or_default();
     let op = match (method.as_str(), rest) {
@@ -150,7 +151,8 @@ pub async fn handle(
         record(&app, &session, action, &repo, false, "repository is not part of this session").await;
         return deny(StatusCode::FORBIDDEN, format!("hyperbeam: {repo} is not one of this session's repositories\n"));
     };
-    let needed = if op == Op::Push { Grant::GITHUB_WRITE } else { Grant::GITHUB_READ };
+    let Ok(host) = app.repo_host(&registered).await else { return deny(StatusCode::INTERNAL_SERVER_ERROR, "hyperbeam: internal error\n") };
+    let needed = host.grant(if op == Op::Push { Level::Write } else { Level::Read });
     if !session.grants.has(&needed) {
         record(&app, &session, action, &registered, false, &format!("requires {needed}")).await;
         return deny(StatusCode::FORBIDDEN, format!("hyperbeam: this session lacks {needed}\n"));
@@ -183,12 +185,13 @@ pub async fn handle(
         };
         let protected = format!("refs/heads/{default_branch}");
         let refs: Vec<&str> = updates.iter().map(|u| u.name.as_str()).collect();
-        if updates.iter().any(|u| u.name == protected) && !session.grants.has(&Grant::GITHUB_MERGE_PR) {
-            let detail = format!("pushing to {default_branch} requires {}", Grant::GITHUB_MERGE_PR);
+        let merge = host.grant(Level::MergePr);
+        if updates.iter().any(|u| u.name == protected) && !session.grants.has(&merge) {
+            let detail = format!("pushing to {default_branch} requires {merge}");
             record(&app, &session, action, &registered, false, &detail).await;
             return deny(
                 StatusCode::FORBIDDEN,
-                format!("hyperbeam: {detail}. Push your work branch and open a pull request instead.\n"),
+                format!("hyperbeam: {detail}. Push your work branch and open a {} instead.\n", host.change_request()),
             );
         }
         record(&app, &session, action, &registered, true, &refs.join(", ")).await;
@@ -197,16 +200,16 @@ pub async fn handle(
     }
 
     let access = if op == Op::Push { Access::Write } else { Access::Read };
-    let upstream_token = match app.github_token(&registered, access).await {
-        Ok(token) => token,
+    let upstream = match app.git_upstream(host, &registered, access).await {
+        Ok(upstream) => upstream,
         Err(err) => return deny(StatusCode::BAD_GATEWAY, format!("hyperbeam: {err:#}\n")),
     };
-    let mut url = format!("{}/{registered}.git/{rest}", app.cfg.github_git_url.trim_end_matches('/'));
+    let mut url = format!("{}/{rest}", upstream.url);
     if !query.is_empty() {
         url.push('?');
         url.push_str(&query);
     }
-    let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{upstream_token}"));
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", upstream.username, upstream.token));
     let mut request = app.http.request(method.clone(), url).header(header::AUTHORIZATION, format!("Basic {basic}"));
     for name in [header::CONTENT_TYPE, header::ACCEPT, header::CONTENT_ENCODING, header::CONTENT_LENGTH, header::USER_AGENT] {
         if let Some(value) = headers.get(&name) {
@@ -223,7 +226,7 @@ pub async fn handle(
 
     let upstream = match request.send().await {
         Ok(response) => response,
-        Err(err) => return deny(StatusCode::BAD_GATEWAY, format!("hyperbeam: could not reach GitHub: {err}\n")),
+        Err(err) => return deny(StatusCode::BAD_GATEWAY, format!("hyperbeam: could not reach {}: {err}\n", host.title())),
     };
     let mut response = Response::builder().status(upstream.status().as_u16());
     for name in [header::CONTENT_TYPE, header::CACHE_CONTROL, header::CONTENT_ENCODING] {
@@ -282,7 +285,10 @@ mod tests {
     fn splits_paths() {
         assert_eq!(split_path("acme/api.git/info/refs"), Some(("acme/api".to_string(), "info/refs")));
         assert_eq!(split_path("acme/api/git-upload-pack"), Some(("acme/api".to_string(), "git-upload-pack")));
+        assert_eq!(split_path("acme/platform/api.git/git-receive-pack"), Some(("acme/platform/api".to_string(), "git-receive-pack")));
         assert_eq!(split_path("acme/api.git"), None);
+        assert_eq!(split_path("acme/api.git/objects/info/packs"), None);
+        assert_eq!(split_path("api.git/info/refs"), None);
         assert_eq!(split_path("../x/info/refs"), None);
     }
 }

@@ -103,17 +103,17 @@ pub fn valid_slug(s: &str) -> bool {
         && !s.ends_with('-')
 }
 
+/// A repository path: `owner/name`, or deeper where the host nests groups
+/// (`group/subgroup/project` on GitLab).
 pub fn valid_repo(s: &str) -> bool {
     let ok = |p: &str| {
         !p.is_empty()
             && p != "."
             && p != ".."
+            && !p.ends_with(".git")
             && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
     };
-    match s.split_once('/') {
-        Some((owner, name)) => ok(owner) && ok(name),
-        None => false,
-    }
+    s.len() <= 255 && (2..=21).contains(&s.split('/').count()) && s.split('/').all(ok)
 }
 
 impl WorkflowSpec {
@@ -272,7 +272,10 @@ prompt: |
     fn repo_names() {
         assert!(valid_repo("acme/api.v2"));
         assert!(!valid_repo("acme/../etc"));
-        assert!(!valid_repo("acme/a/b"));
+        assert!(valid_repo("acme/platform/api"));
+        assert!(!valid_repo("acme"));
+        assert!(!valid_repo("acme//api"));
+        assert!(!valid_repo("acme/api.git"));
         assert!(!valid_repo("/api"));
     }
 }

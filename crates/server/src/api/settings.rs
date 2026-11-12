@@ -2,12 +2,12 @@ use crate::app::App;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::gateway::web;
-use crate::integrations::{self, KINDS};
+use crate::integrations::{self, Host, KINDS, gitlab};
 use crate::store::{self, CredentialSlot, Harness, ModelChoice, Repo, Skill, Workflow};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::{DateTime, Utc};
-use hyperbeam_core::workflow::{WorkflowSpec, valid_repo, valid_slug};
+use hyperbeam_core::workflow::{WorkflowSpec, valid_slug};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -92,7 +92,7 @@ pub async fn list_integrations(State(app): State<App>, _user: AuthUser) -> ApiRe
 pub struct IntegrationBody {
     #[serde(default)]
     config: Value,
-    /// Token, API key or GitHub App private key. Optional when updating.
+    /// Access token or GitHub App private key. Optional when updating.
     secret: Option<String>,
 }
 
@@ -105,6 +105,13 @@ pub async fn put_integration(
     actor.require_admin()?;
     if !KINDS.contains(&kind.as_str()) {
         return Err(ApiError::NotFound("integration"));
+    }
+    // A connection added before this integration existed may hold its name,
+    // and with it the grants and the tool prefix.
+    if crate::connections::by_name(&app.db, &kind).await?.is_some() {
+        return Err(ApiError::Conflict(format!(
+            "a connection named `{kind}` already exists. Remove it under Connections first: its permissions and tool names would collide with this integration's"
+        )));
     }
     let config = match kind.as_str() {
         "github" => {
@@ -121,6 +128,10 @@ pub async fn put_integration(
                 }
                 _ => return Err(ApiError::bad("GitHub mode must be `token` or `app`")),
             }
+        }
+        "gitlab" => {
+            let url = body.config.get("url").and_then(Value::as_str).unwrap_or_default();
+            json!({ "url": gitlab::clean_url(url).map_err(|err| ApiError::bad(format!("{err:#}")))? })
         }
         _ => json!({}),
     };
@@ -157,41 +168,22 @@ pub async fn delete_integration(State(app): State<App>, actor: AuthUser, Path(ki
     sqlx::query("DELETE FROM integrations WHERE kind = $1").bind(&kind).execute(&app.db).await?;
     store::delete_secret(&app.db, &integrations::secret_key(&kind)).await?;
     app.github_tokens.clear();
+    // GitHub's permissions are always on offer. Any other host's exist only
+    // while it is connected, like a connection's, and go when it does.
+    if Host::parse(&kind).is_some_and(|host| host != Host::Github) {
+        super::connections::revoke_system(&app, &kind).await?;
+    }
     Ok(Json(json!({ "ok": true })))
 }
 
 /// Make one cheap authenticated call to confirm the credential works.
 pub async fn test_integration(State(app): State<App>, actor: AuthUser, Path(kind): Path<String>) -> ApiResult<Json<Value>> {
     actor.require_admin()?;
-    let secret = app.integration_secret(&kind).await?.ok_or_else(|| ApiError::bad(format!("{kind} is not connected")))?;
-    let result: anyhow::Result<String> = async {
-        match kind.as_str() {
-            "github" => {
-                let config = app.integration_config("github").await?.unwrap_or_default();
-                let api = app.cfg.github_api_url.trim_end_matches('/');
-                if config["mode"] == "app" {
-                    // Minting a token for a registered repository exercises the whole chain.
-                    let repo: Option<(String,)> = sqlx::query_as("SELECT full_name FROM repos ORDER BY created_at LIMIT 1").fetch_optional(&app.db).await?;
-                    match repo {
-                        Some((repo,)) => {
-                            app.github_token(&repo, crate::integrations::github::Access::Read).await?;
-                            Ok(format!("GitHub App can read {repo}"))
-                        }
-                        None => Ok("Saved. Register a repository to verify the App is installed on it.".to_string()),
-                    }
-                } else {
-                    let resp = app.http.get(format!("{api}/user")).bearer_auth(&secret).header("accept", "application/vnd.github+json").send().await?;
-                    if !resp.status().is_success() {
-                        anyhow::bail!("GitHub rejected the token ({})", resp.status());
-                    }
-                    let user: Value = resp.json().await?;
-                    Ok(format!("Authenticated to GitHub as {}", user["login"].as_str().unwrap_or("unknown")))
-                }
-            }
-            _ => anyhow::bail!("unknown integration"),
-        }
+    let host = Host::parse(&kind).ok_or(ApiError::NotFound("integration"))?;
+    if app.integration_secret(&kind).await?.is_none() {
+        return Err(ApiError::bad(format!("{} is not connected", host.title())));
     }
-    .await;
+    let result = app.host_check(host).await;
     Ok(Json(match result {
         Ok(detail) => json!({ "ok": true, "detail": detail }),
         Err(err) => json!({ "ok": false, "detail": format!("{err:#}") }),
@@ -218,39 +210,78 @@ pub async fn list_repos(State(app): State<App>, AuthUser(user): AuthUser) -> Api
 #[derive(Deserialize)]
 pub struct NewRepo {
     full_name: String,
+    /// `github` or `gitlab`. Worked out from the name when left out.
+    host: Option<String>,
     default_branch: Option<String>,
+}
+
+/// Which host a repository being registered is on, and its path there.
+/// People paste URLs as often as they type `owner/name`.
+async fn locate_repo(app: &App, body: &NewRepo) -> ApiResult<(Host, String)> {
+    let input = body.full_name.trim();
+    let tidy = |path: &str| path.trim_end_matches('/').trim_end_matches(".git").trim_matches('/').to_string();
+    let connected = app.connected_hosts().await?;
+    let mut from_url = None;
+    for host in Host::ALL {
+        let web = format!("{}/", app.host_web_url(host).await?);
+        if let Some(path) = input.strip_prefix(&web) {
+            // A GitLab page URL carries on after the project: /-/issues and so on.
+            from_url = Some((host, tidy(path.split("/-/").next().unwrap_or(path))));
+            break;
+        }
+    }
+    let named = match body.host.as_deref().map(str::trim).filter(|h| !h.is_empty()) {
+        Some(kind) => Some(Host::parse(kind).ok_or_else(|| ApiError::bad(format!("`{kind}` is not a code host Hyperbeam knows")))?),
+        None => None,
+    };
+    let (host, name) = match (named, from_url) {
+        (Some(host), Some((url_host, _))) if host != url_host => {
+            return Err(ApiError::bad(format!("that address is on {}, not {}", url_host.title(), host.title())));
+        }
+        (_, Some(found)) => found,
+        (Some(host), None) => (host, tidy(input)),
+        (None, None) => {
+            let name = tidy(input);
+            // Only GitLab nests groups; otherwise the one connected host, or GitHub.
+            let host = match connected.as_slice() {
+                _ if name.split('/').count() > 2 => Host::Gitlab,
+                [only] => *only,
+                _ => Host::Github,
+            };
+            (host, name)
+        }
+    };
+    if !host.accepts_repo(&name) {
+        return Err(ApiError::bad(match host {
+            Host::Github => "write the repository as owner/name",
+            Host::Gitlab => "write the project as group/project, with any subgroups in between",
+        }));
+    }
+    Ok((host, name))
 }
 
 pub async fn add_repo(State(app): State<App>, actor: AuthUser, Json(body): Json<NewRepo>) -> ApiResult<Json<Value>> {
     actor.require_admin()?;
-    let name = body
-        .full_name
-        .trim()
-        .trim_start_matches("https://github.com/")
-        .trim_end_matches(".git")
-        .trim_matches('/')
-        .to_string();
-    if !valid_repo(&name) {
-        return Err(ApiError::bad("write the repository as owner/name"));
-    }
+    let (host, name) = locate_repo(&app, &body).await?;
     let mut full_name = name.clone();
     let mut default_branch = body.default_branch.clone().filter(|b| !b.trim().is_empty());
     let mut description = String::new();
-    // When GitHub is connected, confirm access and learn the default branch.
-    if app.integration_config("github").await?.is_some() {
-        match app.github_api(reqwest::Method::GET, &name, "", crate::integrations::github::Access::Read, None).await {
+    // When the host is connected, confirm access and learn the default branch.
+    if app.integration_config(host.kind()).await?.is_some() {
+        match app.host_repo_info(host, &name).await {
             Ok(info) => {
-                full_name = info["full_name"].as_str().unwrap_or(&name).to_string();
-                default_branch = default_branch.or_else(|| info["default_branch"].as_str().map(str::to_string));
-                description = info["description"].as_str().unwrap_or("").to_string();
+                full_name = info.full_name;
+                default_branch = default_branch.or(info.default_branch);
+                description = info.description;
             }
-            Err(err) => return Err(ApiError::bad(format!("could not read {name} with the connected GitHub credential: {err:#}"))),
+            Err(err) => return Err(ApiError::bad(format!("could not read {name} with the connected {} credential: {err:#}", host.title()))),
         }
     }
     let repo: Repo = sqlx::query_as(
-        "INSERT INTO repos (id, full_name, default_branch, description, added_by) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+        "INSERT INTO repos (id, host, full_name, default_branch, description, added_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
     )
     .bind(Uuid::now_v7())
+    .bind(host.kind())
     .bind(&full_name)
     .bind(default_branch.unwrap_or_else(|| "main".into()))
     .bind(description)
@@ -258,6 +289,7 @@ pub async fn add_repo(State(app): State<App>, actor: AuthUser, Json(body): Json<
     .fetch_one(&app.db)
     .await
     .map_err(|err| match ApiError::from(err) {
+        // Sessions name repositories by path alone, so a path is registered once.
         ApiError::Conflict(_) => ApiError::Conflict(format!("{full_name} is already registered")),
         other => other,
     })?;

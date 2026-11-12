@@ -5,6 +5,8 @@
 //! repository with only the permissions a request needs).
 
 use crate::app::App;
+pub use crate::integrations::Access;
+use crate::integrations::Host;
 use anyhow::{Context, Result, anyhow, bail};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use reqwest::Method;
@@ -24,13 +26,6 @@ impl GithubTokens {
     }
 }
 
-/// How much a token must be able to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Access {
-    Read,
-    Write,
-}
-
 fn app_jwt(app_id: &str, private_key_pem: &str) -> Result<String> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let claims = json!({ "iat": now - 60, "exp": now + 9 * 60, "iss": app_id });
@@ -42,11 +37,7 @@ fn app_jwt(app_id: &str, private_key_pem: &str) -> Result<String> {
 impl App {
     /// A token able to act on `repo` (`owner/name`) with the given access.
     pub async fn github_token(&self, repo: &str, access: Access) -> Result<String> {
-        let config = self
-            .integration_config("github")
-            .await?
-            .ok_or_else(|| anyhow!("GitHub is not connected. An admin can connect it under Settings → Integrations."))?;
-        let secret = self.integration_secret("github").await?.ok_or_else(|| anyhow!("the GitHub credential is missing"))?;
+        let (config, secret) = self.host_credential(Host::Github).await?;
         if config.get("mode").and_then(Value::as_str) != Some("app") {
             return Ok(secret);
         }
@@ -134,6 +125,29 @@ impl App {
             return Ok(Value::Null);
         }
         serde_json::from_str(&text).context("GitHub sent an unreadable reply")
+    }
+
+    pub(super) async fn github_check(&self) -> Result<String> {
+        let (config, secret) = self.host_credential(Host::Github).await?;
+        if config["mode"] == "app" {
+            // Minting a token for a registered repository exercises the whole chain.
+            let repo: Option<(String,)> =
+                sqlx::query_as("SELECT full_name FROM repos WHERE host = 'github' ORDER BY created_at LIMIT 1").fetch_optional(&self.db).await?;
+            return match repo {
+                Some((repo,)) => {
+                    self.github_token(&repo, Access::Read).await?;
+                    Ok(format!("GitHub App can read {repo}"))
+                }
+                None => Ok("Saved. Register a repository to verify the App is installed on it.".to_string()),
+            };
+        }
+        let api = self.cfg.github_api_url.trim_end_matches('/');
+        let resp = self.http.get(format!("{api}/user")).bearer_auth(&secret).header("accept", "application/vnd.github+json").send().await?;
+        if !resp.status().is_success() {
+            bail!("GitHub rejected the token ({})", resp.status());
+        }
+        let user: Value = resp.json().await?;
+        Ok(format!("Authenticated to GitHub as {}", user["login"].as_str().unwrap_or("unknown")))
     }
 }
 
