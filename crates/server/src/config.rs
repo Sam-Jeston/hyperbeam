@@ -151,6 +151,14 @@ pub struct Config {
     #[arg(long, env = "HYPERBEAM_GITHUB_GIT_URL", default_value = "https://github.com")]
     pub github_git_url: String,
 
+    /// Where the Slack Web API lives. For testing.
+    #[arg(long, env = "HYPERBEAM_SLACK_API_URL", default_value = "https://slack.com/api", hide = true)]
+    pub slack_api_url: String,
+
+    /// Where the Discord API lives. For testing.
+    #[arg(long, env = "HYPERBEAM_DISCORD_API_URL", default_value = "https://discord.com/api/v10", hide = true)]
+    pub discord_api_url: String,
+
     /// Let `web_fetch` read pages on private and loopback addresses, for
     /// documentation that lives on an internal network. Off by default: with
     /// it on, an agent can read anything this server can reach.

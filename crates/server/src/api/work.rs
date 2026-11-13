@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
-use crate::sessions::NewSession;
+use crate::sessions::{NewSession, can_drive};
 use crate::store::{self, Event, Link, Session, User, Workflow, Workstream};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -42,33 +42,8 @@ pub struct NewWorkstream {
     repos: Vec<String>,
 }
 
-async fn insert_workstream(app: &App, user: &User, title: &str, description: &str, repos: &[String]) -> ApiResult<Workstream> {
-    let title = title.trim();
-    if title.is_empty() {
-        return Err(ApiError::bad("a workstream needs a title"));
-    }
-    let mut names = Vec::new();
-    for repo in repos {
-        let found = store::repo_by_name(&app.db, repo).await?.ok_or_else(|| ApiError::bad(format!("repository `{repo}` is not registered")))?;
-        names.push(found.full_name);
-    }
-    let workstream: Workstream = sqlx::query_as(
-        "INSERT INTO workstreams (id, title, description, repos, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-    )
-    .bind(Uuid::now_v7())
-    .bind(title)
-    .bind(description.trim())
-    .bind(json!(names))
-    .bind(user.id)
-    .fetch_one(&app.db)
-    .await?;
-    app.activity(Some(user.id), None, Some(workstream.id), "workstream.created", &format!("{} opened workstream “{title}”", user.name), json!({})).await;
-    app.publish("workstream", None, serde_json::to_value(&workstream).unwrap_or_default());
-    Ok(workstream)
-}
-
 pub async fn create_workstream(State(app): State<App>, AuthUser(user): AuthUser, Json(body): Json<NewWorkstream>) -> ApiResult<Json<Value>> {
-    let workstream = insert_workstream(&app, &user, &body.title, &body.description, &body.repos).await?;
+    let workstream = app.open_workstream(&user, &body.title, &body.description, &body.repos).await?;
     Ok(Json(json!({ "workstream": workstream })))
 }
 
@@ -175,17 +150,6 @@ pub async fn add_comment(State(app): State<App>, AuthUser(user): AuthUser, Path(
 
 // ------------------------------------------------------------------ sessions
 
-/// May this person prompt or stop this session? Prompting an agent makes it
-/// act with its owner's permissions, so beyond the owner and admins it is
-/// limited to people who could have launched the same session themselves.
-fn can_drive(user: &User, session: &Session) -> bool {
-    if user.id == session.created_by || user.is_admin() {
-        return true;
-    }
-    let scope = user.repo_scope();
-    session.grants.is_subset(&user.grants) && session.repos.iter().all(|repo| scope.allows(repo))
-}
-
 #[derive(Deserialize)]
 pub struct ListSessions {
     workstream_id: Option<Uuid>,
@@ -247,7 +211,7 @@ pub async fn create_session(State(app): State<App>, AuthUser(user): AuthUser, Js
     }
     let workstream_id = match (&body.new_workstream, body.workstream_id) {
         (Some(title), _) if !title.trim().is_empty() => {
-            let workstream = insert_workstream(&app, &user, title, &body.prompt, &body.repos).await?;
+            let workstream = app.open_workstream(&user, title, &body.prompt, &body.repos).await?;
             if body.role == SessionRole::Worker {
                 // A conductor scopes first; a single agent just starts building.
                 sqlx::query("UPDATE workstreams SET status = 'building' WHERE id = $1").bind(workstream.id).execute(&app.db).await?;
@@ -271,6 +235,7 @@ pub async fn create_session(State(app): State<App>, AuthUser(user): AuthUser, Js
                 grants,
                 workflow: None,
                 model: body.model,
+                context: None,
             },
         )
         .await?;
@@ -297,7 +262,7 @@ pub async fn run_workflow(State(app): State<App>, AuthUser(user): AuthUser, Path
     let spec = WorkflowSpec::from_yaml(&workflow.yaml).map_err(|e| ApiError::bad(e.to_string()))?;
     let prompt = spec.render(&body.inputs).map_err(|e| ApiError::bad(e.to_string()))?;
     let workstream_id = match (&body.new_workstream, body.workstream_id) {
-        (Some(title), _) if !title.trim().is_empty() => Some(insert_workstream(&app, &user, title, &prompt, &spec.repos).await?.id),
+        (Some(title), _) if !title.trim().is_empty() => Some(app.open_workstream(&user, title, &prompt, &spec.repos).await?.id),
         (_, id) => id,
     };
     let session = app
@@ -316,6 +281,7 @@ pub async fn run_workflow(State(app): State<App>, AuthUser(user): AuthUser, Path
                 grants: Some(spec.grants.clone()),
                 workflow: Some(spec.name.clone()),
                 model: body.model.or_else(|| spec.model.clone()),
+                context: None,
             },
         )
         .await?;

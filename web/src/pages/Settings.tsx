@@ -9,11 +9,13 @@ import { Select } from "../components/ui/select";
 import { Badge, Card, EmptyState, Notice, Skeleton } from "../components/ui/surface";
 import { api, type CodeHost, type CredentialSlot, type Harness, modelLabel, type Repo } from "../lib/api";
 import { refreshMe, useStore } from "../lib/store";
+import { ChatApps, ChatIdentities } from "./Chat";
 import { Connections } from "./Connections";
 import { A, CopyField, ErrorNote, navigate, Page, PageHeader, systemName, Time, useAction, useDocumentTitle, useLoad } from "../lib/ui";
 
 const TABS: { value: string; label: string; adminOnly: boolean }[] = [
   { value: "integrations", label: "Integrations", adminOnly: false },
+  { value: "chat", label: "Chat apps", adminOnly: false },
   { value: "repositories", label: "Repositories", adminOnly: false },
   { value: "harnesses", label: "Harnesses", adminOnly: false },
   { value: "general", label: "General", adminOnly: true },
@@ -32,6 +34,7 @@ export function SettingsPage({ tab }: { tab: string }) {
       <PageHeader title="Settings" description="Connect the systems your agents work with and choose how they run." />
       <LinkTabs className="mb-6" active={active} onNavigate={navigate} tabs={tabs.map((t) => ({ ...t, href: `/settings/${t.value}` }))} />
       {active === "repositories" ? <Repositories isAdmin={isAdmin} /> :
+       active === "chat" ? <ChatApps isAdmin={isAdmin} /> :
        active === "harnesses" ? <Harnesses isAdmin={isAdmin} /> :
        active === "general" ? <General /> :
        active === "audit" ? <Audit /> :
@@ -738,6 +741,10 @@ function Account() {
           <ErrorNote error={password.error} />
           <div><Button type="submit" disabled={!current || next.length < 10} loading={password.busy}>Change password</Button></div>
         </form>
+      </AccountSection>
+
+      <AccountSection title="Chat accounts" description="Slack and Discord accounts that can start and direct agents as you.">
+        <ChatIdentities />
       </AccountSection>
 
       <AccountSection title="API keys" description={<>For the <code className="font-mono text-[12px]">hyperbeam</code> command-line tool and your own scripts. A key acts as you.</>}>

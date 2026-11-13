@@ -145,7 +145,11 @@ function connect() {
   });
   es.addEventListener("workstream", (e) => {
     const patch = JSON.parse((e as MessageEvent).data);
-    if (patch.title) {
+    if (patch.deleted) {
+      // Opened for work that then could not start.
+      const { [patch.id as string]: _gone, ...rest } = state.workstreams;
+      set({ workstreams: rest });
+    } else if (patch.title) {
       set({ workstreams: { ...state.workstreams, [patch.id]: patch } });
     } else {
       void api.get(`/workstreams/${patch.id}`).then((r) => set({ workstreams: { ...state.workstreams, [patch.id]: r.workstream } })).catch(() => {});

@@ -19,6 +19,7 @@ The end-to-end tests start a real server, real runner processes driving a script
 - immediate revocation;
 - resuming after teardown;
 - conductor delegation;
+- Slack and Discord against stand-ins for both: linking by email and by one-time link, refusing people who are not linked, starting agents in enabled channels, replies, questions answered with buttons, and stopping;
 - model selection;
 - the egress allowlist.
 
@@ -39,3 +40,4 @@ On a local `kind` cluster (Kubernetes 1.34) with the Helm chart:
 - Sign-in is email and password only (no OIDC yet).
 - A connection has one credential or one OAuth sign-in, shared by every agent, so agents act as that one account. Stdio-only MCP servers can’t be connected yet.
 - Workspaces are ephemeral, so work survives a teardown only if it was pushed.
+- The Slack and Discord apps are tested against stand-ins, not yet against the live services. One workspace or server set-up per installation; a session started on the web does not notify its owner in chat.

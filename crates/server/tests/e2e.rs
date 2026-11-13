@@ -8,6 +8,9 @@
 //! tests are skipped. Build the runner and the test agent first:
 //! `cargo build -p hyperbeam-runner -p hyperbeam-test-agent`.
 
+#[path = "support/chat.rs"]
+mod fakes;
+
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Path, RawQuery, State};
@@ -16,6 +19,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post, put};
 use base64::Engine;
 use clap::Parser;
+use fakes::{DISCORD_BOT, DISCORD_TOKEN, FakeDiscord, FakeSlack, SLACK_APP_TOKEN, SLACK_BOT, SLACK_BOT_TOKEN, eventually};
 use hyperbeam_server::config::Config;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -435,6 +439,8 @@ struct Harness {
     forge_base: String,
     mcp: FakeMcp,
     mcp_base: String,
+    slack: FakeSlack,
+    discord: FakeDiscord,
     agent: PathBuf,
     _tmp: PathBuf,
 }
@@ -522,6 +528,11 @@ impl Harness {
         mcp.oauth.lock().unwrap().base = mcp_base.clone();
         tokio::spawn(axum::serve(mcp_listener, mcp.clone().router()).into_future());
 
+        let slack = FakeSlack::default();
+        let slack_api = slack.start().await;
+        let discord = FakeDiscord::default();
+        let discord_api = discord.start().await;
+
         let bin_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
         let runner = bin_dir.join("hyperbeam-runner");
         let agent = bin_dir.join("hyperbeam-test-agent");
@@ -547,6 +558,8 @@ impl Harness {
             "--egress-addr", &egress_addr,
             "--egress-allow", "allowed.invalid",
             "--preset-urls", &format!("linear={mcp_base}/linear/mcp,notion={mcp_base}/notion/mcp,exa={mcp_base}/exa/mcp"),
+            "--slack-api-url", &slack_api,
+            "--discord-api-url", &discord_api,
             // The site the agents read in these tests is on this machine.
             "--web-allow-private",
         ])
@@ -554,7 +567,7 @@ impl Harness {
         let (app, router) = hyperbeam_server::build(cfg).await.expect("server builds");
         tokio::spawn(hyperbeam_server::egress::run(app, egress_listener));
         tokio::spawn(axum::serve(listener, router).into_future());
-        Some(Harness { base, http: reqwest::Client::new(), github, forge_base: format!("http://{gh_addr}"), mcp, mcp_base, agent, _tmp: tmp })
+        Some(Harness { base, http: reqwest::Client::new(), github, forge_base: format!("http://{gh_addr}"), mcp, mcp_base, slack, discord, agent, _tmp: tmp })
     }
 
     /// Set up the team and register the scripted test agent as the
@@ -1348,4 +1361,288 @@ async fn notion_connects_by_oauth_and_keeps_its_token_fresh() {
     // Disconnecting forgets the sign-in and everyone's Notion permissions.
     owner.ok(Method::DELETE, "/connections/notion", None).await;
     assert_eq!(ana.get("/me").await["user"]["grants"], json!([]));
+}
+
+// --------------------------------------------------------------- chat apps
+
+impl Client<'_> {
+    /// Wait until a chat app's connection to its platform is up.
+    async fn chat_connected(&self, platform: &str) {
+        for _ in 0..200 {
+            let apps = self.get("/chat").await;
+            let app = apps["apps"].as_array().unwrap().iter().find(|a| a["platform"] == platform).cloned().unwrap();
+            if app["status"]["state"] == "connected" {
+                return;
+            }
+            assert_ne!(app["status"]["state"], "error", "{app}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("{platform} did not connect");
+    }
+
+    /// Wait for the team to have `n` sessions; newest first.
+    async fn wait_sessions(&self, n: usize) -> Vec<Value> {
+        for _ in 0..200 {
+            let sessions = self.get("/sessions").await["sessions"].as_array().cloned().unwrap_or_default();
+            if sessions.len() >= n {
+                return sessions;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("there are not {n} session(s)");
+    }
+}
+
+/// The one-time link in a note from the bot.
+fn link_code(note: &str) -> String {
+    let rest = note.split("/link/").nth(1).unwrap_or_else(|| panic!("no link in {note:?}"));
+    rest.split(|c: char| c.is_whitespace() || c == '>' || c == '|').next().unwrap().to_string()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_are_started_and_directed_from_slack() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    h.connect_github(&owner).await;
+    // Agents started from chat run on the team's default harness.
+    owner.ok(Method::PUT, "/settings", Some(json!({ "default_harness": "scripted" }))).await;
+    let mia = h.member(&owner, "mia@example.com", &["github:read"]).await;
+    let slack = &h.slack;
+    let mention = format!("<@{SLACK_BOT}>");
+    let to = |user: &'static str, needle: &'static str| move |body: &Value| body["user"] == user && body["text"].as_str().is_some_and(|t| t.contains(needle));
+
+    // Connecting checks the tokens first, and is an admin's to do.
+    let tokens = json!({ "tokens": { "bot_token": SLACK_BOT_TOKEN, "app_token": SLACK_APP_TOKEN } });
+    assert_eq!(mia.call(Method::PUT, "/chat/slack", Some(tokens.clone())).await.0, StatusCode::FORBIDDEN);
+    let (status, body) = owner.call(Method::PUT, "/chat/slack", Some(json!({ "tokens": { "bot_token": "xoxb-wrong", "app_token": SLACK_APP_TOKEN } }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let connected = owner.ok(Method::PUT, "/chat/slack", Some(tokens)).await;
+    assert_eq!(connected["config"], json!({ "auto_link_email": true, "workspace": "Acme", "bot_name": "hyperbeam" }));
+    owner.chat_connected("slack").await;
+    slack.connected().await;
+
+    // An admin chooses the channels; one shared with another organisation
+    // cannot be among them.
+    let channels = owner.get("/chat/slack/channels").await["channels"].clone();
+    assert_eq!(channels.as_array().unwrap().iter().map(|c| (c["name"].as_str().unwrap(), c["enabled"].as_bool().unwrap())).collect::<Vec<_>>(), [("#dev", false), ("#partners", false)]);
+    let (status, body) = owner.call(Method::PUT, "/chat/slack/channels/CPARTNERS", Some(json!({ "enabled": true }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(mia.call(Method::PUT, "/chat/slack/channels/CDEV", Some(json!({ "enabled": true }))).await.0, StatusCode::FORBIDDEN);
+    owner.ok(Method::PUT, "/chat/slack/channels/CDEV", Some(json!({ "enabled": true }))).await;
+
+    // Someone the team does not know can do nothing. They are sent a link,
+    // privately, and nothing is started.
+    slack.say("UNOBODY", "CDEV", None, &format!("{mention} !say hi"));
+    let note = slack.wait_for("chat.postEphemeral", to("UNOBODY", "/link/")).await;
+    // Nor can a guest from another organisation who has a member's address.
+    slack.say("UGUEST", "CDEV", None, &format!("{mention} !say hi"));
+    slack.wait_for("chat.postEphemeral", to("UGUEST", "/link/")).await;
+    assert!(owner.get("/sessions").await["sessions"].as_array().unwrap().is_empty());
+
+    // The link says whose chat account it is, works once, and makes that
+    // account act as whoever opened it signed in.
+    let code = link_code(note["text"].as_str().unwrap());
+    assert_eq!(mia.get(&format!("/chat/link/{code}")).await, json!({ "platform": "slack", "display_name": "Nora Nobody" }));
+    mia.post(&format!("/chat/link/{code}"), json!({})).await;
+    assert_eq!(mia.call(Method::POST, &format!("/chat/link/{code}"), Some(json!({}))).await.0, StatusCode::BAD_REQUEST);
+    let linked = mia.get("/me/chat-identities").await["identities"].clone();
+    assert_eq!((linked[0]["external_id"].as_str(), linked[0]["linked_by"].as_str()), (Some("UNOBODY"), Some("code")));
+    assert_eq!(owner.call(Method::DELETE, "/me/chat-identities/slack/UNOBODY", None).await.0, StatusCode::NOT_FOUND);
+    mia.ok(Method::DELETE, "/me/chat-identities/slack/UNOBODY", None).await;
+
+    // A workspace member whose confirmed address is a team member's is
+    // linked on the spot. Where they asked still has to be enabled.
+    slack.say("UOLIVE", "CRANDOM", None, &format!("{mention} !say hi"));
+    slack.wait_for("chat.postEphemeral", to("UOLIVE", "isn't enabled in this channel")).await;
+    let linked = owner.get("/me/chat-identities").await["identities"].clone();
+    assert_eq!((linked[0]["external_id"].as_str(), linked[0]["linked_by"].as_str()), (Some("UOLIVE"), Some("email")));
+    slack.say_with("UOLIVE", "CDEV", None, &format!("{mention} !say hi"), json!({ "is_ext_shared_channel": true }));
+    slack.wait_for("chat.postEphemeral", to("UOLIVE", "shared with another organisation")).await;
+    assert!(owner.get("/sessions").await["sessions"].as_array().unwrap().is_empty());
+
+    // A request that names no repository, in a channel with none set: the
+    // bot asks which, in the thread, and only the person who asked may say.
+    let ts = slack.say("UOLIVE", "CDEV", None, &format!("{mention} !say Done with it."));
+    let in_thread = |body: &Value| body["thread_ts"] == ts.as_str();
+    let picker = slack.wait_for("chat.postMessage", |b| in_thread(b) && !FakeSlack::buttons_of(b).is_empty()).await;
+    assert_eq!(FakeSlack::buttons_of(&picker), [("acme/demo".to_string(), "repo:0".to_string()), ("No repository".to_string(), "repo:none".to_string())]);
+    let picker_ts = picker["_ts"].as_str().unwrap();
+    slack.click("UMIA", "CDEV", picker_ts, &ts, "repo:0");
+    slack.wait_for("chat.postEphemeral", to("UMIA", "Only the person who asked")).await;
+    assert!(owner.get("/sessions").await["sessions"].as_array().unwrap().is_empty());
+    slack.click("UOLIVE", "CDEV", picker_ts, &ts, "repo:0");
+    slack.wait_for("chat.update", |b| b["ts"] == picker_ts && FakeSlack::text_of(b).contains("acme/demo")).await;
+
+    // The agent is the owner's, with the repository, and on the board.
+    let session = owner.wait_sessions(1).await[0].clone();
+    let id = session["id"].as_str().unwrap();
+    assert_eq!(session["repos"], json!(["acme/demo"]));
+    assert_eq!(session["created_by"], owner.get("/me").await["user"]["id"]);
+    assert!(session["workstream_id"].is_string());
+    owner.wait_turns(id, 1).await;
+
+    // The thread gets one status message, kept current, then what the
+    // agent said to close its turn. The request is marked as seen.
+    let status = slack.wait_for("chat.postMessage", |b| in_thread(b) && FakeSlack::text_of(b).starts_with("**!say Done with it.**")).await;
+    let status_ts = status["_ts"].as_str().unwrap();
+    assert!(status.to_string().contains(&format!("/s/{id}")), "{status}");
+    slack.wait_for("chat.postMessage", |b| in_thread(b) && FakeSlack::text_of(b).trim() == "Done with it.").await;
+    slack.wait_for("chat.update", |b| b["ts"] == status_ts && FakeSlack::text_of(b).contains("Waiting for your reply")).await;
+    slack.wait_for("reactions.add", |b| b["timestamp"] == ts.as_str()).await;
+
+    // A reply in the thread is the agent's next prompt; no mention needed.
+    slack.say("UOLIVE", "CDEV", Some(&ts), "!say Second answer.");
+    let events = owner.wait_turns(id, 2).await;
+    let last = events.iter().rev().find(|e| e["kind"] == "user_message").unwrap();
+    assert_eq!((last["data"]["author"].as_str(), last["data"]["text"].as_str()), (Some("Olive Owner"), Some("!say Second answer.")));
+    slack.wait_for("chat.postMessage", |b| in_thread(b) && FakeSlack::text_of(b).trim() == "Second answer.").await;
+
+    // Mia is linked but could not have launched this agent, so she cannot
+    // direct it from chat any more than from its page.
+    slack.say("UMIA", "CDEV", Some(&ts), "!say hijacked");
+    slack.say("UMIA", "CDEV", Some(&ts), &format!("{mention} !say hijacked"));
+    slack.wait_for("chat.postEphemeral", to("UMIA", "You are watching this agent")).await;
+    assert_eq!(owner.events(id).await.iter().filter(|e| e["kind"] == "user_message").count(), 2);
+
+    // A question is put to the owner by name, with its options as buttons.
+    slack.say("UOLIVE", "CDEV", Some(&ts), r#"!mcp hyperbeam_ask_user {"question": "Postgres or SQLite?", "options": ["Postgres", "SQLite"]}"#);
+    owner.wait_turns(id, 3).await;
+    let asked = slack.wait_for("chat.postMessage", |b| in_thread(b) && FakeSlack::text_of(b).contains("Postgres or SQLite?")).await;
+    assert!(FakeSlack::text_of(&asked).starts_with("<@UOLIVE> "), "{asked}");
+    let options = FakeSlack::buttons_of(&asked);
+    assert_eq!(options.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>(), ["Postgres", "SQLite"]);
+    let asked_ts = asked["_ts"].as_str().unwrap();
+    slack.wait_for("chat.update", |b| b["ts"] == status_ts && FakeSlack::text_of(b).contains("Has a question")).await;
+    slack.click("UMIA", "CDEV", asked_ts, &ts, &options[1].1);
+    eventually("Mia to be told she is watching", || (slack.calls_to("chat.postEphemeral").iter().filter(|b| to("UMIA", "You are watching")(b)).count() == 2).then_some(())).await;
+    assert_eq!(owner.session(id).await["question"]["text"], "Postgres or SQLite?");
+    slack.click("UOLIVE", "CDEV", asked_ts, &ts, &options[1].1);
+    let events = owner.wait_turns(id, 4).await;
+    assert_eq!(owner.session(id).await["question"], Value::Null);
+    let delivered = events.iter().rev().find(|e| e["kind"] == "user_message").unwrap()["data"]["text"].as_str().unwrap();
+    assert!(delivered.contains("Postgres or SQLite?") && delivered.ends_with("SQLite"), "{delivered}");
+    slack.wait_for("chat.update", |b| b["ts"] == asked_ts && FakeSlack::text_of(b).contains("**Olive Owner** answered: SQLite")).await;
+    // The buttons are spent.
+    slack.click("UOLIVE", "CDEV", asked_ts, &ts, &options[0].1);
+    slack.wait_for("chat.postEphemeral", to("UOLIVE", "already been answered")).await;
+
+    // Stop, from the status message; then a reply starts the agent again.
+    slack.click("UOLIVE", "CDEV", status_ts, &ts, "stop");
+    slack.wait_for("chat.update", |b| b["ts"] == status_ts && FakeSlack::text_of(b).contains("Stopped")).await;
+    assert_eq!(owner.session(id).await["status"], "cancelled");
+    slack.say("UOLIVE", "CDEV", Some(&ts), "!say Back again.");
+    owner.wait_turns(id, 5).await;
+    slack.wait_for("chat.postMessage", |b| in_thread(b) && FakeSlack::text_of(b).contains("Back again.")).await;
+
+    // A direct message starts an agent too, with no channel to enable.
+    let dm = slack.say("UOLIVE", "DOLIVE", None, "!say In private. Use acme/demo.");
+    let sessions = owner.wait_sessions(2).await;
+    assert_eq!(sessions[0]["repos"], json!(["acme/demo"]));
+    slack.wait_for("chat.postMessage", |b| b["channel"] == "DOLIVE" && b["thread_ts"] == dm.as_str() && FakeSlack::text_of(b).contains("In private.")).await;
+
+    // With linking by email turned off, an unlinked member is sent a link.
+    owner.ok(Method::DELETE, "/me/chat-identities/slack/UOLIVE", None).await;
+    let changed = owner.ok(Method::PUT, "/chat/slack", Some(json!({ "auto_link_email": false }))).await;
+    assert_eq!(changed["config"]["auto_link_email"], false);
+    eventually("the bot to reconnect", || (slack.connections.load(Ordering::SeqCst) >= 2).then_some(())).await;
+    slack.say("UOLIVE", "CDEV", None, &format!("{mention} !say hi"));
+    slack.wait_for("chat.postEphemeral", to("UOLIVE", "/link/")).await;
+    assert_eq!(owner.wait_sessions(2).await.len(), 2);
+
+    // Disconnecting forgets the tokens and the channels.
+    owner.ok(Method::DELETE, "/chat/slack", None).await;
+    let apps = owner.get("/chat").await;
+    assert_eq!(apps["apps"][0], json!({ "platform": "slack", "connected": false, "config": {} }));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_are_started_and_directed_from_discord() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    h.connect_github(&owner).await;
+    // Agents started from chat run on the team's default harness.
+    owner.ok(Method::PUT, "/settings", Some(json!({ "default_harness": "scripted" }))).await;
+    let discord = &h.discord;
+    let mention = format!("<@{DISCORD_BOT}>");
+    let says = |needle: &'static str| move |body: &Value| body["content"].as_str().is_some_and(|t| t.contains(needle));
+
+    owner.ok(Method::PUT, "/chat/discord", Some(json!({ "tokens": { "bot_token": DISCORD_TOKEN } }))).await;
+    owner.chat_connected("discord").await;
+    discord.connected().await;
+    // Only channels a thread can start in are offered. #dev gets a default
+    // repository, so nobody has to name one there.
+    let channels = owner.get("/chat/discord/channels").await["channels"].clone();
+    assert_eq!(channels.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect::<Vec<_>>(), ["#dev", "#random"]);
+    let (status, body) = owner.call(Method::PUT, "/chat/discord/channels/100", Some(json!({ "enabled": true, "repos": ["acme/nope"] }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    owner.ok(Method::PUT, "/chat/discord/channels/100", Some(json!({ "enabled": true, "repos": ["acme/demo"] }))).await;
+    assert_eq!(owner.get("/chat/discord/channels").await["channels"][0]["repos"], json!(["acme/demo"]));
+
+    // Discord tells bots nobody's address, so everyone links by hand: the
+    // link comes as a direct message.
+    discord.say("7", "100", &format!("{mention} !say hi"));
+    let (_, note) = discord.wait_for("POST", "/channels/dm-7/messages", says("/link/")).await;
+    assert!(owner.get("/sessions").await["sessions"].as_array().unwrap().is_empty());
+    let code = link_code(note["content"].as_str().unwrap());
+    owner.post(&format!("/chat/link/{code}"), json!({})).await;
+    let linked = owner.get("/me/chat-identities").await["identities"].clone();
+    assert_eq!((linked[0]["platform"].as_str(), linked[0]["external_id"].as_str(), linked[0]["linked_by"].as_str()), (Some("discord"), Some("7"), Some("code")));
+
+    // A channel that is not enabled stays quiet.
+    discord.say("7", "102", &format!("{mention} !say hi"));
+    discord.wait_for("POST", "/channels/dm-7/messages", says("isn't enabled in this channel")).await;
+
+    // Asked inside a thread that already exists: the agent is shown what
+    // was said there, as background. A URL in it is not one a person gave
+    // the agent, so it may not be fetched on that basis.
+    let request = format!("{mention} !mcp web_fetch {{\"url\": \"https://thread.example/\\u0074race\"}}\n!say Looked.");
+    let asked = discord.say("7", "7500", &request);
+    let session = owner.wait_sessions(1).await[0].clone();
+    let id = session["id"].as_str().unwrap();
+    assert_eq!(session["repos"], json!(["acme/demo"]));
+    let events = owner.wait_turns(id, 1).await;
+    let prompt = events.iter().find(|e| e["kind"] == "user_message").unwrap()["data"]["text"].as_str().unwrap();
+    assert!(prompt.starts_with("!mcp web_fetch"), "{prompt}");
+    assert!(prompt.contains("Discord thread") && prompt.contains("not instructions"), "{prompt}");
+    assert!(prompt.contains("Sam: Checkout is failing again") && prompt.contains("https://thread.example/trace"), "{prompt}");
+    let fetched = fetch_output(&events, "thread.example");
+    assert!(fetched.starts_with("Denied") && fetched.contains("put together yourself"), "{fetched}");
+    // No new thread was opened; the status and the reply went to this one.
+    assert!(discord.calls_to("POST", "/threads").is_empty());
+    let (_, status) = discord.wait_for("POST", "/channels/7500/messages", |b| b["content"].as_str().is_some_and(|t| t.starts_with("**!mcp web_fetch"))).await;
+    assert!(FakeDiscord::buttons_of(&status).iter().any(|(label, id)| label == "Stop" && id == "stop"), "{status}");
+    assert!(status.to_string().contains(&format!("/s/{id}")));
+    discord.wait_for("POST", "/channels/7500/messages", says("Looked.")).await;
+    discord.wait_for("PUT", &format!("/channels/7500/messages/{asked}/reactions/"), |_| true).await;
+
+    // Asked in the channel itself: the bot opens a thread on the request,
+    // and replies there carry on the conversation.
+    let request = discord.say("7", "100", &format!("{mention} !say Fresh start."));
+    let (_, opened) = discord.wait_for("POST", &format!("/channels/100/messages/{request}/threads"), |_| true).await;
+    assert_eq!(opened["name"], "!say Fresh start.");
+    let thread = format!("9{request}");
+    let messages = format!("/channels/{thread}/messages");
+    discord.wait_for("POST", &messages, says("Fresh start.")).await;
+    let second = owner.wait_sessions(2).await[0]["id"].as_str().unwrap().to_string();
+    owner.wait_turns(&second, 1).await;
+    discord.say("7", &thread, "!say More.");
+    owner.wait_turns(&second, 2).await;
+    discord.wait_for("POST", &messages, says("More.")).await;
+
+    // Someone who is not linked is left alone in an agent's thread unless
+    // they speak to the bot.
+    discord.say("8", &thread, "nice");
+    discord.say("8", &thread, &format!("{mention} !say mine now"));
+    discord.wait_for("POST", "/channels/dm-8/messages", says("/link/")).await;
+    assert_eq!(owner.events(&second).await.iter().filter(|e| e["kind"] == "user_message").count(), 2);
+
+    // Stop, from the status message. The press is acknowledged at once.
+    let (_, status) = discord.wait_for("POST", &messages, |b| b["content"].as_str().is_some_and(|t| t.starts_with("**!say Fresh start.**"))).await;
+    let status_id = status["_id"].as_str().unwrap();
+    discord.click("7", &thread, status_id, "stop");
+    discord.wait_for("PATCH", &format!("{messages}/{status_id}"), says("Stopped")).await;
+    assert_eq!(owner.session(&second).await["status"], "cancelled");
+    assert_eq!(discord.calls_to("POST", "/callback").len(), 1);
+    // The first agent was not touched.
+    assert_ne!(owner.session(id).await["status"], "cancelled");
 }

@@ -70,6 +70,21 @@ pub struct NewSession {
     pub workflow: Option<String>,
     /// Model to run on; `None` for the harness profile's default.
     pub model: Option<String>,
+    /// Background the agent is shown after the prompt but that no person
+    /// vouched for, such as the earlier messages of a chat thread. URLs in it
+    /// are not ones the agent may fetch.
+    pub context: Option<String>,
+}
+
+/// May this person prompt or stop this session? Prompting an agent makes it
+/// act with its owner's permissions, so beyond the owner and admins it is
+/// limited to people who could have launched the same session themselves.
+pub fn can_drive(user: &User, session: &Session) -> bool {
+    if user.id == session.created_by || user.is_admin() {
+        return true;
+    }
+    let scope = user.repo_scope();
+    session.grants.is_subset(&user.grants) && session.repos.iter().all(|repo| scope.allows(repo))
 }
 
 /// The models a harness reported in its `Ready` message.
@@ -103,7 +118,7 @@ fn slug(text: &str) -> String {
     out.trim_end_matches('-').to_string()
 }
 
-fn clip(text: &str, max_chars: usize) -> String {
+pub(crate) fn clip(text: &str, max_chars: usize) -> String {
     let text = text.trim();
     if text.chars().count() <= max_chars {
         return text.to_string();
@@ -228,6 +243,34 @@ impl App {
     }
 
     // -------------------------------------------------------------- creation
+
+    /// Put a piece of work on the board.
+    pub async fn open_workstream(&self, user: &User, title: &str, description: &str, repos: &[String]) -> ApiResult<store::Workstream> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(ApiError::bad("a workstream needs a title"));
+        }
+        let mut names = Vec::new();
+        for repo in repos {
+            let found =
+                store::repo_by_name(&self.db, repo).await?.ok_or_else(|| ApiError::bad(format!("repository `{repo}` is not registered")))?;
+            names.push(found.full_name);
+        }
+        let workstream: store::Workstream = sqlx::query_as(
+            "INSERT INTO workstreams (id, title, description, repos, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+        )
+        .bind(Uuid::now_v7())
+        .bind(title)
+        .bind(description.trim())
+        .bind(json!(names))
+        .bind(user.id)
+        .fetch_one(&self.db)
+        .await?;
+        self.activity(Some(user.id), None, Some(workstream.id), "workstream.created", &format!("{} opened workstream “{title}”", user.name), json!({}))
+            .await;
+        self.publish("workstream", None, serde_json::to_value(&workstream).unwrap_or_default());
+        Ok(workstream)
+    }
 
     pub async fn create_session(&self, user: &User, new: NewSession) -> ApiResult<Session> {
         let prompt = new.prompt.trim().to_string();
@@ -372,7 +415,8 @@ impl App {
             Some(parent) => format!("Conductor “{}”", parent.title),
             None => user.name.clone(),
         };
-        self.queue_input(&session, new.parent.is_none().then_some(user.id), &author, &prompt).await?;
+        let context = new.context.as_deref().map(str::trim).filter(|c| !c.is_empty());
+        self.queue_input(&session, new.parent.is_none().then_some(user.id), &author, &prompt, context).await?;
 
         let verb = if new.role == SessionRole::Conductor { "started conductor" } else { "started agent" };
         self.activity(
@@ -391,18 +435,24 @@ impl App {
         Ok(session)
     }
 
-    async fn queue_input(&self, session: &Session, user_id: Option<Uuid>, author: &str, text: &str) -> Result<()> {
+    /// Queue a prompt. `context` is delivered and shown with it, but only
+    /// `text` is taken as the person's own words.
+    async fn queue_input(&self, session: &Session, user_id: Option<Uuid>, author: &str, text: &str, context: Option<&str>) -> Result<()> {
+        let delivered = match context {
+            Some(context) => format!("{text}\n\n{context}"),
+            None => text.to_string(),
+        };
         sqlx::query("INSERT INTO session_inputs (id, session_id, user_id, text) VALUES ($1, $2, $3, $4)")
             .bind(Uuid::now_v7())
             .bind(session.id)
             .bind(user_id)
-            .bind(text)
+            .bind(&delivered)
             .execute(&self.db)
             .await?;
         self.append_event(
             session.id,
             event::USER_MESSAGE,
-            json!({ "text": text, "user_id": user_id, "author": author }),
+            json!({ "text": delivered, "user_id": user_id, "author": author }),
         )
         .await?;
         if user_id.is_some() {
@@ -420,7 +470,7 @@ impl App {
         if text.is_empty() {
             return Err(ApiError::bad("message is empty"));
         }
-        self.queue_input(session, user_id, author, text).await?;
+        self.queue_input(session, user_id, author, text, None).await?;
         let status = SessionStatus::parse(&session.status).unwrap_or(SessionStatus::Failed);
         if status.is_live() && self.live.contains(session.id) {
             self.dispatch(session.id).await;

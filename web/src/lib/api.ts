@@ -245,6 +245,41 @@ export interface Harness {
 /** Where repositories live. Each has its own integration and permissions. */
 export type CodeHost = "github" | "gitlab";
 
+export type ChatPlatform = "slack" | "discord";
+
+/** A Slack or Discord bot people start and direct agents from. */
+export interface ChatApp {
+  platform: ChatPlatform;
+  connected: boolean;
+  config: { auto_link_email?: boolean; workspace?: string; bot_name?: string };
+  /** How the connection to the platform is doing right now. */
+  status?: { state: "connecting" | "connected" | "error"; detail: string } | null;
+  updated_at?: string;
+}
+
+export interface ChatChannel {
+  id: string;
+  name: string;
+  private: boolean;
+  /** Shared with another organisation; agents cannot be started in it. */
+  external: boolean;
+  enabled: boolean;
+  /** Enabled once, but the bot is no longer in it. */
+  missing?: boolean;
+  repos: string[];
+  harness: string | null;
+  role: "worker" | "conductor";
+}
+
+/** A chat account that acts as a person. */
+export interface ChatIdentity {
+  platform: ChatPlatform;
+  external_id: string;
+  display_name: string;
+  linked_by: "email" | "code";
+  linked_at: string;
+}
+
 export interface Repo {
   id: string;
   host: CodeHost;

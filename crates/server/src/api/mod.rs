@@ -1,6 +1,7 @@
 //! The HTTP API used by the web UI and the CLI.
 
 mod account;
+mod chat;
 mod connections;
 mod settings;
 mod work;
@@ -59,6 +60,13 @@ pub fn router() -> Router<App> {
         .route("/oauth/callback", get(connections::oauth_callback))
         .route("/connections/{name}/approvals", put(connections::set_approvals))
         .route("/grants", get(connections::grants))
+        .route("/chat", get(chat::list))
+        .route("/chat/link/{code}", get(chat::link_info).post(chat::link))
+        .route("/chat/{platform}", put(chat::put).delete(chat::delete))
+        .route("/chat/{platform}/channels", get(chat::channels))
+        .route("/chat/{platform}/channels/{id}", put(chat::put_channel))
+        .route("/me/chat-identities", get(chat::my_identities))
+        .route("/me/chat-identities/{platform}/{id}", delete(chat::unlink))
         .route("/repos", get(settings::list_repos).post(settings::add_repo))
         .route("/repos/{id}", delete(settings::delete_repo))
         .route("/harnesses", get(settings::list_harnesses).post(settings::create_harness))

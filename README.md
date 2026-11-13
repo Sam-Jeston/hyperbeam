@@ -16,6 +16,8 @@ its own sandbox, and everyone can watch the scoping and the building as it happe
   GitHub or GitLab (read, write, open PR, merge PR) and each connected MCP service (read, write), per repository.
 - **Agents never hold your credentials.** GitHub, GitLab and connected MCP services (Linear, Notion, Slack, Datadog, Sentry and more, or your own) are reached through Hyperbeam's tool
   gateway and git proxy, which check every request and record it.
+- **From Slack and Discord.** Mention the bot to start an agent, reply in the thread to direct it, and
+  answer its questions with a button. Each person acts as their own Hyperbeam account.
 - **A conductor.** One agent that scopes a request, starts worker agents across repositories, and is
   told when each reports back.
 - **Skills, workflows and team notes.** What your team teaches its agents, kept in one place and
@@ -24,8 +26,8 @@ its own sandbox, and everyone can watch the scoping and the building as it happe
 ## How it fits together
 
 ```
- Browser / CLI
-      │  REST + server-sent events
+ Browser / CLI / Slack / Discord
+      │  REST + server-sent events (chat apps: the server dials out)
 ┌─────▼────────────────── hyperbeam-server ────────────────────────┐
 │ API · teams and permissions · session manager · event log      │
 │ tool gateway (MCP) · git proxy · egress allowlist proxy        │

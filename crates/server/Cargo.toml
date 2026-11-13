@@ -47,6 +47,7 @@ aws-config = { version = "1", default-features = false, features = ["rt-tokio", 
 aws-sdk-kms = { version = "1", default-features = false, features = ["rt-tokio", "default-https-client"] }
 aws-sdk-secretsmanager = { version = "1", default-features = false, features = ["rt-tokio", "default-https-client"] }
 htmd = "0.5.6"
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 [dev-dependencies]
 clap.workspace = true

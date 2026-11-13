@@ -16,6 +16,7 @@ import { cn } from "./lib/utils";
 import { AuthScreen } from "./pages/Auth";
 import { ActivityPage, AgentsPage } from "./pages/Agents";
 import { Board } from "./pages/Board";
+import { LinkPage } from "./pages/Chat";
 import { LibraryPage } from "./pages/Library";
 import { SessionPage } from "./pages/Session";
 import { SettingsPage } from "./pages/Settings";
@@ -184,6 +185,7 @@ function Shell() {
   else if (a === "activity") page = <ActivityPage />;
   else if (a === "library") page = <LibraryPage tab={b ?? "skills"} />;
   else if (a === "team") page = <TeamPage />;
+  else if (a === "link" && b) page = <LinkPage key={b} code={b} />;
   else if (a === "settings") page = <SettingsPage tab={b ?? "integrations"} />;
   else page = <NotFound />;
 

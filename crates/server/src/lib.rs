@@ -3,6 +3,7 @@
 pub mod api;
 pub mod app;
 pub mod auth;
+pub mod chat;
 pub mod config;
 pub mod connections;
 pub mod crypto;
@@ -64,6 +65,7 @@ pub async fn build(cfg: Config) -> Result<(App, Router)> {
     app.adopt_legacy_linear().await.context("moving the Linear integration to a connection")?;
     app.recover().await?;
     tokio::spawn(app.clone().reaper());
+    chat::start(&app).await.context("starting the chat apps")?;
 
     let router = Router::new()
         .nest("/api/v1", api::router())

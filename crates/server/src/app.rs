@@ -41,6 +41,8 @@ pub struct Inner {
     pub oauth_flows: std::sync::Mutex<std::collections::HashMap<String, crate::connections::oauth::Pending>>,
     /// Held while a connection's OAuth token is renewed.
     pub oauth_refresh: tokio::sync::Mutex<()>,
+    /// The Slack and Discord apps people start and direct agents from.
+    pub chat: crate::chat::Hub,
 }
 
 #[derive(Clone)]
@@ -75,6 +77,7 @@ impl App {
             refreshing: Default::default(),
             oauth_flows: Default::default(),
             oauth_refresh: Default::default(),
+            chat: Default::default(),
         }))
     }
 
