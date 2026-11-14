@@ -842,6 +842,10 @@ async fn conductor_delegates_and_hears_back() {
     assert_eq!(child["parent_id"], id);
     assert_eq!(child["summary"], "Part A is built.");
 
+    // The owner hears from the conductor, never from the worker under it.
+    let inbox = owner.wait_notifications(1).await;
+    assert!(inbox.iter().all(|n| n["session_id"] == id), "{inbox:?}");
+
     // A worker cannot manage agents.
     let child_id = child["id"].as_str().unwrap();
     owner.post(&format!("/sessions/{child_id}/messages"), json!({ "text": "!mcp hyperbeam_spawn_agent {\"title\": \"x\", \"prompt\": \"y\"}" })).await;
@@ -1553,6 +1557,98 @@ async fn agents_are_started_and_directed_from_slack() {
     owner.ok(Method::DELETE, "/chat/slack", None).await;
     let apps = owner.get("/chat").await;
     assert_eq!(apps["apps"][0], json!({ "platform": "slack", "connected": false, "config": {} }));
+}
+
+// ----------------------------------------------------------- notifications
+
+impl Client<'_> {
+    /// Wait for this person to have `n` notifications; newest first.
+    async fn wait_notifications(&self, n: usize) -> Vec<Value> {
+        for _ in 0..200 {
+            let list = self.get("/notifications").await["notifications"].as_array().cloned().unwrap_or_default();
+            if list.len() >= n {
+                return list;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("there are not {n} notification(s)");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn people_are_notified_when_their_agents_need_them() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    let mia = h.member(&owner, "mia@example.com", &[]).await;
+    let slack = &h.slack;
+
+    // An agent that finishes a turn tells the person who started it, and
+    // nobody else.
+    let created = owner.post("/sessions", json!({ "prompt": "!say All done.", "harness": "scripted" })).await;
+    let id = created["session"]["id"].as_str().unwrap();
+    owner.wait_turns(id, 1).await;
+    let inbox = owner.wait_notifications(1).await;
+    assert_eq!((inbox[0]["kind"].as_str(), inbox[0]["body"].as_str(), inbox[0]["session_id"].as_str()), (Some("finished"), Some("All done."), Some(id)));
+    assert_eq!(inbox[0]["read_at"], Value::Null);
+    assert_eq!(owner.get("/notifications").await["unread"], 1);
+    assert_eq!(mia.get("/notifications").await, json!({ "notifications": [], "unread": 0 }));
+    // Nobody can mark another person's notification as read.
+    mia.post("/notifications/read", json!({ "id": inbox[0]["id"] })).await;
+    assert_eq!(owner.get("/notifications").await["unread"], 1);
+
+    // Replying shows it was seen. A question is one notification, not also
+    // a second for the turn that asked it.
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": r#"!mcp hyperbeam_ask_user {"question": "Postgres or SQLite?", "options": ["Postgres", "SQLite"]}"# })).await;
+    owner.wait_turns(id, 2).await;
+    let inbox = owner.wait_notifications(2).await;
+    assert_eq!(inbox[0]["kind"], "question");
+    assert!(inbox[0]["body"].as_str().unwrap().starts_with("Postgres or SQLite?") && inbox[0]["body"].as_str().unwrap().contains("Postgres | SQLite"), "{inbox:?}");
+    assert!(inbox[1]["read_at"].is_string());
+    owner.post(&format!("/sessions/{id}/answer"), json!({ "text": "!say Shipping." })).await;
+    owner.wait_turns(id, 3).await;
+    let inbox = owner.wait_notifications(3).await;
+    let kinds: Vec<&str> = inbox.iter().filter_map(|n| n["kind"].as_str()).collect();
+    assert_eq!(kinds, ["finished", "question", "finished"]);
+    assert_eq!(owner.get("/notifications").await["unread"], 1);
+    assert_eq!(owner.post("/notifications/read", json!({})).await["read"], 1);
+    assert_eq!(owner.get("/notifications").await["unread"], 0);
+
+    // A chat app can be turned on only once it is connected and the person
+    // has an account linked there.
+    let channels = owner.get("/me/notification-channels").await["channels"].clone();
+    assert_eq!(channels[0], json!({ "platform": "slack", "enabled": false, "connected": false, "accounts": [] }));
+    let on = json!({ "enabled": true });
+    let (status, body) = owner.call(Method::PUT, "/me/notification-channels/slack", Some(on.clone())).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    owner.ok(Method::PUT, "/chat/slack", Some(json!({ "tokens": { "bot_token": SLACK_BOT_TOKEN, "app_token": SLACK_APP_TOKEN } }))).await;
+    owner.chat_connected("slack").await;
+    slack.connected().await;
+    let (status, body) = owner.call(Method::PUT, "/me/notification-channels/slack", Some(on.clone())).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    // Writing to the bot links the owner by their workspace address.
+    slack.say("UOLIVE", "CDEV", None, &format!("<@{SLACK_BOT}> hello"));
+    slack.wait_for("chat.postEphemeral", |b| b["user"] == "UOLIVE").await;
+    owner.ok(Method::PUT, "/me/notification-channels/slack", Some(on)).await;
+    let channels = owner.get("/me/notification-channels").await["channels"].clone();
+    assert_eq!(channels[0], json!({ "platform": "slack", "enabled": true, "connected": true, "accounts": ["Olive Owner"] }));
+
+    // From then on the bot also tells them directly, with a way to the agent.
+    let created = owner.post("/sessions", json!({ "prompt": "!say Over to you.", "harness": "scripted" })).await;
+    let second = created["session"]["id"].as_str().unwrap();
+    let direct = slack
+        .wait_for("chat.postMessage", |b| b["channel"] == "UOLIVE" && FakeSlack::text_of(b).contains("finished and is waiting for you"))
+        .await;
+    assert!(FakeSlack::text_of(&direct).contains("Over to you."), "{direct}");
+    assert!(direct.to_string().contains(&format!("/s/{second}")), "{direct}");
+
+    // Turned off again, they are told in the hub only.
+    owner.ok(Method::PUT, "/me/notification-channels/slack", Some(json!({ "enabled": false }))).await;
+    owner.post(&format!("/sessions/{second}/messages"), json!({ "text": "!say Quietly." })).await;
+    owner.wait_turns(second, 2).await;
+    let inbox = owner.wait_notifications(5).await;
+    assert_eq!(inbox[0]["body"], "Quietly.");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!slack.calls_to("chat.postMessage").iter().any(|b| FakeSlack::text_of(b).contains("Quietly.")));
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -408,6 +408,12 @@ impl Platform for Slack {
         Ok(())
     }
 
+    /// Posting to a member's id reaches them in their messages with the app.
+    async fn direct(&self, user_id: &str, message: &Outgoing) -> Result<()> {
+        self.send("chat.postMessage", json!({ "channel": user_id, "unfurl_links": false, "unfurl_media": false }), message).await?;
+        Ok(())
+    }
+
     async fn react(&self, channel: &str, message_id: &str) -> Result<()> {
         match self.call("reactions.add", Body::Json(json!({ "channel": channel, "timestamp": message_id, "name": "eyes" }))).await {
             Err(err) if !err.to_string().contains("already_reacted") => Err(err),

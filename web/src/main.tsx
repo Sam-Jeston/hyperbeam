@@ -1,4 +1,4 @@
-import { Activity, Bot, BookOpen, ChevronsUpDown, LayoutGrid, Loader2, LogOut, Menu as MenuIcon, Monitor, Moon, Plus, Settings, Sun, UserRound, Users } from "lucide-react";
+import { Activity, Bell, Bot, BookOpen, ChevronsUpDown, LayoutGrid, Loader2, LogOut, Menu as MenuIcon, Monitor, Moon, Plus, Settings, Sun, UserRound, Users } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
@@ -18,6 +18,7 @@ import { ActivityPage, AgentsPage } from "./pages/Agents";
 import { Board } from "./pages/Board";
 import { LinkPage } from "./pages/Chat";
 import { LibraryPage } from "./pages/Library";
+import { NotificationsPage } from "./pages/Notifications";
 import { SessionPage } from "./pages/Session";
 import { SettingsPage } from "./pages/Settings";
 import { TeamPage } from "./pages/Team";
@@ -27,17 +28,20 @@ interface NavItem {
   href: string;
   label: string;
   icon: ReactNode;
-  badge?: number;
+  /** A count beside the label: agents live now, or things unread. */
+  badge?: { n: number; live?: boolean; title: string };
   match: (path: string) => boolean;
 }
 
 function useNav(): { section?: string; items: NavItem[] }[] {
   const liveCount = useStore((s) => Object.values(s.sessions).filter(isLive).length);
+  const unread = useStore((s) => s.unread);
   return [
     {
       items: [
         { href: "/", label: "Board", icon: <LayoutGrid />, match: (p) => p === "/" || p.startsWith("/w/") },
-        { href: "/agents", label: "Agents", icon: <Bot />, badge: liveCount, match: (p) => p.startsWith("/agents") || p.startsWith("/s/") || p.startsWith("/sessions/") },
+        { href: "/agents", label: "Agents", icon: <Bot />, badge: { n: liveCount, live: true, title: `${liveCount} agent${liveCount === 1 ? "" : "s"} live` }, match: (p) => p.startsWith("/agents") || p.startsWith("/s/") || p.startsWith("/sessions/") },
+        { href: "/notifications", label: "Notifications", icon: <Bell />, badge: { n: unread, title: `${unread} unread` }, match: (p) => p.startsWith("/notifications") },
         { href: "/activity", label: "Activity", icon: <Activity />, match: (p) => p.startsWith("/activity") },
       ],
     },
@@ -74,11 +78,11 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
               >
                 {item.icon}
                 <span className="flex-1 truncate">{item.label}</span>
-                {item.badge ? (
-                  <Tooltip content={`${item.badge} agent${item.badge === 1 ? "" : "s"} live`}>
-                    <span className="flex items-center gap-1 rounded-full bg-run/14 px-1.5 text-[11px] font-semibold tabular-nums text-run">
-                      <span className="size-1.5 rounded-full bg-run animate-pulse-ring" />
-                      {item.badge}
+                {item.badge && item.badge.n > 0 ? (
+                  <Tooltip content={item.badge.title}>
+                    <span className={cn("flex items-center gap-1 rounded-full px-1.5 text-[11px] font-semibold tabular-nums", item.badge.live ? "bg-run/14 text-run" : "bg-primary text-primary-foreground")}>
+                      {item.badge.live && <span className="size-1.5 rounded-full bg-run animate-pulse-ring" />}
+                      {item.badge.n > 99 ? "99+" : item.badge.n}
                     </span>
                   </Tooltip>
                 ) : null}
@@ -163,6 +167,7 @@ function Shell() {
   const composing = useComposerOpen();
   const [navOpen, setNavOpen] = useState(false);
   const teamName = useStore((s) => s.meta?.team_name);
+  const unread = useStore((s) => s.unread);
 
   // C starts new work from anywhere, as long as you are not typing.
   useEffect(() => {
@@ -183,6 +188,7 @@ function Shell() {
   else if ((a === "s" || a === "sessions") && b) page = <SessionPage key={b} id={b} />;
   else if (a === "agents") page = <AgentsPage />;
   else if (a === "activity") page = <ActivityPage />;
+  else if (a === "notifications") page = <NotificationsPage />;
   else if (a === "library") page = <LibraryPage tab={b ?? "skills"} />;
   else if (a === "team") page = <TeamPage />;
   else if (a === "link" && b) page = <LinkPage key={b} code={b} />;
@@ -203,7 +209,11 @@ function Shell() {
           <BrandMark size={22} />
           <Wordmark className="text-[16px]" />
           {teamName && <span className="truncate text-[12.5px] text-muted">· {teamName}</span>}
-          <Button variant="primary" size="icon-sm" className="ml-auto" aria-label="New work" onClick={() => openComposer()}><Plus /></Button>
+          <Button variant="ghost" size="icon" className="relative ml-auto" aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"} onClick={() => navigate("/notifications")}>
+            <Bell />
+            {unread > 0 && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-primary ring-2 ring-surface" />}
+          </Button>
+          <Button variant="primary" size="icon-sm" aria-label="New work" onClick={() => openComposer()}><Plus /></Button>
         </div>
         {!connected && (
           <div role="status" className="flex items-center justify-center gap-2 border-b border-wait/25 bg-wait/10 px-4 py-1.5 text-[12.5px] text-wait">

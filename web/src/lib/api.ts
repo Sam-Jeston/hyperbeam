@@ -280,6 +280,30 @@ export interface ChatIdentity {
   linked_at: string;
 }
 
+/** Something an agent you started wants you to know. */
+export interface Notification {
+  id: string;
+  session_id: string;
+  /** It asked you a question, finished a turn and is waiting, or failed. */
+  kind: "question" | "finished" | "failed";
+  /** The agent's title when it happened. */
+  title: string;
+  /** The question, the agent's closing message, or the error. */
+  body: string;
+  created_at: string;
+  read_at: string | null;
+}
+
+/** A chat app that can also send you your notifications, as a direct message. */
+export interface NotificationChannel {
+  platform: ChatPlatform;
+  enabled: boolean;
+  /** An admin has connected the bot. */
+  connected: boolean;
+  /** Your linked accounts there, by display name. */
+  accounts: string[];
+}
+
 export interface Repo {
   id: string;
   host: CodeHost;

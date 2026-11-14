@@ -2,7 +2,7 @@
 // server's event stream, so every screen shows what is happening now.
 
 import { useSyncExternalStore } from "react";
-import { api, type Activity, type GrantInfo, type Meta, type Session, type User, type Workstream } from "./api";
+import { api, type Activity, type GrantInfo, type Meta, type Notification, type Session, type User, type Workstream } from "./api";
 
 export interface State {
   meta: Meta | null;
@@ -15,6 +15,10 @@ export interface State {
   sessions: Record<string, Session>;
   workstreams: Record<string, Workstream>;
   activity: Activity[];
+  /** The signed-in person's own, newest first. */
+  notifications: Notification[];
+  /** How many they have not read, including any older than the list holds. */
+  unread: number;
   connected: boolean;
 }
 
@@ -27,6 +31,8 @@ let state: State = {
   sessions: {},
   workstreams: {},
   activity: [],
+  notifications: [],
+  unread: 0,
   connected: false,
 };
 
@@ -78,7 +84,7 @@ export async function signOut() {
   await api.post("/auth/logout").catch(() => {});
   stream?.close();
   stream = null;
-  set({ me: null, users: {}, sessions: {}, workstreams: {}, activity: [], connected: false });
+  set({ me: null, users: {}, sessions: {}, workstreams: {}, activity: [], notifications: [], unread: 0, connected: false });
 }
 
 export async function refreshMe() {
@@ -87,12 +93,13 @@ export async function refreshMe() {
 }
 
 async function loadTeam() {
-  const [grants, users, sessions, workstreams, activity] = await Promise.all([
+  const [grants, users, sessions, workstreams, activity, notifications] = await Promise.all([
     api.get("/grants"),
     api.get("/users"),
     api.get("/sessions?limit=500"),
     api.get("/workstreams?include_archived=true"),
     api.get("/activity?limit=100"),
+    api.get("/notifications"),
   ]);
   set({
     grants: grants.grants,
@@ -100,6 +107,8 @@ async function loadTeam() {
     sessions: byId<Session>(sessions.sessions),
     workstreams: byId<Workstream>(workstreams.workstreams),
     activity: activity.activity,
+    notifications: notifications.notifications,
+    unread: notifications.unread,
     ready: true,
   });
   connect();
@@ -115,6 +124,34 @@ export async function reloadUsers() {
   const users = await api.get("/users");
   set({ users: byId<User>(users.users) });
 }
+
+async function loadNotifications() {
+  const { notifications, unread } = await api.get("/notifications");
+  set({ notifications, unread });
+}
+
+/**
+ * Mark notifications as read: one, those about one session, or all of them.
+ * Shown at once; the server then tells this person's other tabs.
+ */
+export function markRead(which: { id?: string; session_id?: string } = {}) {
+  const hit = (n: Notification) => !n.read_at && (!which.id || n.id === which.id) && (!which.session_id || n.session_id === which.session_id);
+  const targeted = which.id || which.session_id;
+  const shown = state.notifications.filter(hit).length;
+  // Nothing listed to mark, and nothing unread that the list is too short to hold.
+  if (shown === 0 && state.unread <= state.notifications.filter((n) => !n.read_at).length) return;
+  const now = new Date().toISOString();
+  set({
+    notifications: state.notifications.map((n) => (hit(n) ? { ...n, read_at: now } : n)),
+    unread: targeted ? Math.max(0, state.unread - shown) : 0,
+  });
+  // On success the server's `notifications` event brings every tab into line.
+  void api.post("/notifications/read", which).catch(() => loadNotifications().catch(() => {}));
+}
+
+/** Is this person looking at that agent's page right now? */
+const watching = (sessionId: string) =>
+  document.visibilityState === "visible" && [`/s/${sessionId}`, `/sessions/${sessionId}`].includes(window.location.pathname);
 
 function connect() {
   stream?.close();
@@ -160,5 +197,14 @@ function connect() {
     const item = JSON.parse((e as MessageEvent).data);
     set({ activity: [item, ...state.activity].slice(0, 300) });
   });
+  es.addEventListener("notification", (e) => {
+    const item: Notification = JSON.parse((e as MessageEvent).data);
+    if (state.notifications.some((n) => n.id === item.id)) return;
+    set({ notifications: [item, ...state.notifications].slice(0, 300), unread: state.unread + 1 });
+    // They are watching it happen: there is nothing to catch up on.
+    if (watching(item.session_id)) markRead({ id: item.id });
+  });
+  // Read somewhere else, perhaps in another tab.
+  es.addEventListener("notifications", () => void loadNotifications().catch(() => {}));
   es.addEventListener("resync", () => void loadTeam());
 }

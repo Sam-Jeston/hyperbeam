@@ -3,6 +3,7 @@
 mod account;
 mod chat;
 mod connections;
+mod notifications;
 mod settings;
 mod work;
 
@@ -67,6 +68,10 @@ pub fn router() -> Router<App> {
         .route("/chat/{platform}/channels/{id}", put(chat::put_channel))
         .route("/me/chat-identities", get(chat::my_identities))
         .route("/me/chat-identities/{platform}/{id}", delete(chat::unlink))
+        .route("/notifications", get(notifications::list))
+        .route("/notifications/read", post(notifications::read))
+        .route("/me/notification-channels", get(notifications::channels))
+        .route("/me/notification-channels/{platform}", put(notifications::put_channel))
         .route("/repos", get(settings::list_repos).post(settings::add_repo))
         .route("/repos/{id}", delete(settings::delete_repo))
         .route("/harnesses", get(settings::list_harnesses).post(settings::create_harness))
@@ -112,13 +117,18 @@ fn sse_frame(msg: &StreamMsg) -> SseEvent {
     SseEvent::default().event(msg.topic).data(msg.payload.to_string())
 }
 
-/// Team-wide stream: session, workstream and activity changes.
-async fn stream_all(State(app): State<App>, _user: AuthUser) -> Response {
+/// Team-wide stream: session, workstream and activity changes, and the
+/// signed-in person's own notifications.
+async fn stream_all(State(app): State<App>, AuthUser(user): AuthUser) -> Response {
     let mut rx = app.bus.subscribe();
     let stream = async_stream(move |tx| async move {
         loop {
             match rx.recv().await {
                 Ok(msg) if msg.topic != "event" => {
+                    // Some things are for one person only.
+                    if msg.to.is_some_and(|to| to != user.id) {
+                        continue;
+                    }
                     if tx.send(sse_frame(&msg)).is_err() {
                         break;
                     }

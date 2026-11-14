@@ -11,6 +11,7 @@ import { api, type CodeHost, type CredentialSlot, type Harness, modelLabel, type
 import { refreshMe, useStore } from "../lib/store";
 import { ChatApps, ChatIdentities } from "./Chat";
 import { Connections } from "./Connections";
+import { NotificationChannels } from "./Notifications";
 import { A, CopyField, ErrorNote, navigate, Page, PageHeader, systemName, Time, useAction, useDocumentTitle, useLoad } from "../lib/ui";
 
 const TABS: { value: string; label: string; adminOnly: boolean }[] = [
@@ -745,6 +746,10 @@ function Account() {
 
       <AccountSection title="Chat accounts" description="Slack and Discord accounts that can start and direct agents as you.">
         <ChatIdentities />
+      </AccountSection>
+
+      <AccountSection title="Notifications" description={<>When an agent you started asks you a question, finishes a turn or fails. They are always in <A href="/notifications" className="text-primary hover:underline">Notifications</A>; a chat app can tell you as well.</>}>
+        <NotificationChannels />
       </AccountSection>
 
       <AccountSection title="API keys" description={<>For the <code className="font-mono text-[12px]">hyperbeam</code> command-line tool and your own scripts. A key acts as you.</>}>

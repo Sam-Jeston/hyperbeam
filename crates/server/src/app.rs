@@ -16,8 +16,12 @@ use uuid::Uuid;
 /// Something that happened, fanned out to every connected browser.
 #[derive(Debug, Clone, Serialize)]
 pub struct StreamMsg {
-    /// `event` (one session log entry), `session`, `workstream`, `activity`.
+    /// `event` (one session log entry), `session`, `workstream`, `activity`,
+    /// `notification`, `notifications`.
     pub topic: &'static str,
+    /// Set when only this person's browsers should be told.
+    #[serde(skip)]
+    pub to: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<Uuid>,
     pub payload: Value,
@@ -82,6 +86,11 @@ impl App {
     }
 
     pub fn publish(&self, topic: &'static str, session_id: Option<Uuid>, payload: Value) {
-        let _ = self.bus.send(Arc::new(StreamMsg { topic, session_id, payload }));
+        let _ = self.bus.send(Arc::new(StreamMsg { topic, to: None, session_id, payload }));
+    }
+
+    /// Tell one person's browsers something nobody else should see.
+    pub fn publish_to(&self, user_id: Uuid, topic: &'static str, payload: Value) {
+        let _ = self.bus.send(Arc::new(StreamMsg { topic, to: Some(user_id), session_id: None, payload }));
     }
 }

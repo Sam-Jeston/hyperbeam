@@ -109,6 +109,12 @@ async fn slack_speaks_socket_mode() {
     assert_eq!((note["user"].as_str(), note["thread_ts"].as_str()), (Some("UMIA"), Some(ts.as_str())));
     slack.whisper(&Private { user: "UMIA".into(), channel: "DMIA".into(), thread: None, token: None }, "Link your account").await.unwrap();
     assert_eq!(fake.calls_to("chat.postMessage").pop().unwrap()["channel"], "DMIA");
+    // A notification goes to the member directly, link and all.
+    let notice = Outgoing { text: "**“Fix checkout” failed**".into(), buttons: vec![Button::link("Open", "https://hb.example/s/1")] };
+    slack.direct("UMIA", &notice).await.unwrap();
+    let sent = fake.calls_to("chat.postMessage").pop().unwrap();
+    assert_eq!(sent["channel"], "UMIA");
+    assert!(sent.get("thread_ts").is_none() && sent.to_string().contains("https://hb.example/s/1"), "{sent}");
     slack.react("CDEV", &ts).await.unwrap();
     assert_eq!(fake.calls_to("reactions.add").pop().unwrap()["timestamp"], ts.as_str());
 
@@ -202,7 +208,14 @@ async fn discord_speaks_the_gateway() {
     let to = Private { user: "7".into(), channel: "100".into(), thread: None, token: None };
     discord.whisper(&to, "Link your account: https://hb.example/link/x").await.unwrap();
     assert!(fake.calls_to("POST", "/channels/dm-7/messages").pop().unwrap().1["content"].as_str().unwrap().contains("/link/x"));
+    // A notification is a direct message too; one that cannot be delivered
+    // is the caller's to deal with, not something to say in a channel.
+    let notice = Outgoing { text: "**“Fix checkout” failed**".into(), buttons: vec![Button::link("Open", "https://hb.example/s/1")] };
+    discord.direct("7", &notice).await.unwrap();
+    let (_, sent) = fake.calls_to("POST", "/channels/dm-7/messages").pop().unwrap();
+    assert!(sent["content"].as_str().unwrap().contains("failed") && sent.to_string().contains("https://hb.example/s/1"), "{sent}");
     *fake.dms_closed.lock().unwrap() = true;
+    assert!(discord.direct("7", &notice).await.is_err());
     discord.whisper(&to, "Link your account: https://hb.example/link/y").await.unwrap();
     let (_, notice) = fake.calls_to("POST", "/channels/100/messages").pop().unwrap();
     let notice = notice["content"].as_str().unwrap();

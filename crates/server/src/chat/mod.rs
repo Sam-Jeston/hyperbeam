@@ -244,6 +244,8 @@ pub trait Platform: Send + Sync {
     async fn post(&self, place: &Place, message: &Outgoing) -> Result<String>;
     async fn update(&self, place: &Place, message_id: &str, message: &Outgoing) -> Result<()>;
     async fn whisper(&self, to: &Private, text: &str) -> Result<()>;
+    /// Send someone a direct message, unprompted.
+    async fn direct(&self, user_id: &str, message: &Outgoing) -> Result<()>;
     /// Mark a message as seen.
     async fn react(&self, channel: &str, message_id: &str) -> Result<()>;
     /// The thread so far, oldest first, as (author, text), leaving out
@@ -954,6 +956,8 @@ pub async fn remove(app: &App, kind: Kind) -> Result<()> {
     app.chat.stop(kind);
     sqlx::query("DELETE FROM chat_apps WHERE platform = $1").bind(kind.as_str()).execute(&app.db).await?;
     sqlx::query("DELETE FROM chat_channels WHERE platform = $1").bind(kind.as_str()).execute(&app.db).await?;
+    // Nobody is left being notified through an app that may come back as a different bot.
+    sqlx::query("DELETE FROM notification_channels WHERE platform = $1").bind(kind.as_str()).execute(&app.db).await?;
     for (name, _) in kind.tokens() {
         store::delete_secret(&app.db, &kind.secret_key(name)).await?;
     }

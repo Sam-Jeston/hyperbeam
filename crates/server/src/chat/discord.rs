@@ -385,6 +385,13 @@ impl Platform for Discord {
         Ok(())
     }
 
+    async fn direct(&self, user_id: &str, message: &Outgoing) -> Result<()> {
+        let dm = self.call(Method::POST, "/users/@me/channels", Some(json!({ "recipient_id": user_id }))).await?;
+        let id = dm["id"].as_str().ok_or_else(|| anyhow!("Discord did not open a direct message"))?;
+        self.call(Method::POST, &format!("/channels/{id}/messages"), Some(Self::body(message))).await?;
+        Ok(())
+    }
+
     async fn react(&self, channel: &str, message_id: &str) -> Result<()> {
         self.call(Method::PUT, &format!("/channels/{channel}/messages/{message_id}/reactions/{EYES}/@me"), None).await?;
         Ok(())

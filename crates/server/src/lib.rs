@@ -14,6 +14,7 @@ pub mod gitproxy;
 pub mod hub;
 pub mod integrations;
 pub mod masterkey;
+pub mod notify;
 pub mod probe;
 pub mod sandbox;
 pub mod sessions;

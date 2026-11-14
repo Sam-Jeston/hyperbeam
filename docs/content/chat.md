@@ -48,6 +48,8 @@ The bot acts for people, so it has to know which Hyperbeam account a chat accoun
 
 See and remove your linked accounts under **Settings → My account**.
 
+A linked account is also where the bot can send your [notifications](/notifications), if you turn that on.
+
 Being linked makes you yourself, no more. Directing an agent from chat takes the same standing as [directing it from its page](/sessions#who-can-direct-an-agent): you are its owner, an admin, or hold at least the grants it does.
 
 ## Set up Slack
@@ -92,7 +94,7 @@ A Slack channel shared with another organisation cannot be enabled, and the bot 
 ## What the bot can and cannot do
 
 - The bot’s tokens are stored encrypted in the control plane, like every other credential, and are never given to an agent.
-- The bot only speaks in threads it was asked into, and in private notes to the person it is answering.
+- The bot only speaks in threads it was asked into, in private notes to the person it is answering, and in direct messages to people who asked it for their notifications.
 - Messages posted by apps, including an agent posting through the Slack connection, are never taken as prompts. Only what a person typed is.
 - Earlier messages of a thread are shown to the agent as background, marked as such. URLs in them are not ones “a person gave the agent” for the purposes of [web access](/security).
-- Disconnecting a chat app deletes its tokens and its channel settings. Agents it started keep running and stay on the board. People stay linked.
+- Disconnecting a chat app deletes its tokens and its channel settings, and turns off the notifications people had it send them. Agents it started keep running and stay on the board. People stay linked.

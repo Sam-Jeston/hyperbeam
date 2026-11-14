@@ -32,6 +32,8 @@ An agent can ask a question when a decision is yours to make. The question appea
 - Any message you send while a question is open counts as the reply.
 - The agent does not block while it waits. It finishes what it can and ends its turn, and your answer starts its next one. If its sandbox has shut down in the meantime, the answer wakes it in a fresh one.
 
+You get a [notification](/notifications) when an agent you started asks a question, and when it finishes a turn or fails.
+
 A worker started by a [conductor](/conductor) asks its conductor first. The session shows **Asked its conductor**, and you can still answer it yourself.
 
 Answering directs the agent, so it needs the same standing as sending a message. See [Who can direct an agent](#who-can-direct-an-agent).

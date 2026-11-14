@@ -10,7 +10,7 @@ import { confirm } from "../components/ui/dialog";
 import { Kbd } from "../components/ui/input";
 import { Badge, Card, KeyValues, Notice, Panel, Skeleton } from "../components/ui/surface";
 import { api, isLive, type Question, type Session, type SessionEvent } from "../lib/api";
-import { useStore } from "../lib/store";
+import { markRead, useStore } from "../lib/store";
 import { A, Avatar, clock, ErrorNote, Ext, Markdown, Page, PageHeader, StatusBadge, Time, useAction, useDocumentTitle, useLoad, useTick } from "../lib/ui";
 import { cn } from "../lib/utils";
 import { AgentRow } from "./Board";
@@ -155,6 +155,16 @@ export function SessionPage({ id }: { id: string }) {
   const [behind, setBehind] = useState(false);
   const session = liveSession ?? data?.session;
   useDocumentTitle(session?.title);
+
+  // Opening an agent's page is reading what it wanted to tell you.
+  useEffect(() => {
+    const seen = () => {
+      if (document.visibilityState === "visible") markRead({ session_id: id });
+    };
+    seen();
+    document.addEventListener("visibilitychange", seen);
+    return () => document.removeEventListener("visibilitychange", seen);
+  }, [id]);
 
   // Follow the transcript while the reader is at the bottom of it.
   useEffect(() => {

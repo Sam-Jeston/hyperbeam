@@ -471,6 +471,10 @@ impl App {
             return Err(ApiError::bad("message is empty"));
         }
         self.queue_input(session, user_id, author, text, None).await?;
+        // Whoever replies has seen what the agent wanted of them.
+        if let Some(user_id) = user_id {
+            self.read_notifications(user_id, None, Some(session.id)).await?;
+        }
         let status = SessionStatus::parse(&session.status).unwrap_or(SessionStatus::Failed);
         if status.is_live() && self.live.contains(session.id) {
             self.dispatch(session.id).await;
@@ -537,6 +541,11 @@ impl App {
                 json!({ "question_id": question.id }),
             )
             .await;
+            let mut asked = question.text.clone();
+            if !question.options.is_empty() {
+                asked.push_str(&format!("\n\nIt suggests: {}", question.options.join(" | ")));
+            }
+            self.notify(session, crate::notify::Kind::Question, &asked).await;
         }
         Ok(question)
     }
@@ -1068,6 +1077,24 @@ impl App {
                 json!({ "stop_reason": stop_reason, "summary": clip(&summary, 400) }),
             )
             .await;
+            // The owner is told once the agent is really waiting on them: not
+            // when they interrupted it themselves, not when its open question
+            // already told them, and not when its next prompt is queued.
+            if stop_reason != "cancelled" && session.question.is_none() && !self.reports_to_conductor(&session).await {
+                let (queued,): (i64,) = sqlx::query_as("SELECT count(*) FROM session_inputs WHERE session_id = $1 AND delivered_at IS NULL")
+                    .bind(session_id)
+                    .fetch_one(&self.db)
+                    .await?;
+                if queued == 0 {
+                    let said = match stop_reason {
+                        _ if !summary.is_empty() => summary.clone(),
+                        "error" => "It hit an error.".to_string(),
+                        "refusal" => "It declined to continue.".to_string(),
+                        _ => String::new(),
+                    };
+                    self.notify(&session, crate::notify::Kind::Finished, &said).await;
+                }
+            }
             let mut report = if summary.is_empty() { "(it produced no closing message)".to_string() } else { summary };
             if let Some(Json(question)) = &session.question {
                 report.push_str(&format!(
@@ -1202,6 +1229,9 @@ impl App {
                 SessionStatus::Failed => {
                     let reason = clip(error.unwrap_or("unknown error"), 300);
                     self.activity(None, Some(&session), None, "session.failed", &format!("“{title}” failed: {reason}"), json!({})).await;
+                    if !self.reports_to_conductor(&session).await {
+                        self.notify(&session, crate::notify::Kind::Failed, &reason).await;
+                    }
                     self.notify_parent(&session, &format!("failed: {reason}")).await;
                 }
                 SessionStatus::Cancelled => {
