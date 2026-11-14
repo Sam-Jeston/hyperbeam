@@ -44,18 +44,18 @@ const req = (agent: AgentId, lane: Lane, dest: DestId, action: string, ok: boole
 
 /** One loop of the scene. Each beat plays about a second and a half after the last. */
 export const BEATS: Beat[] = [
-  req("claude", "git", "github", "push nm/audit-csv", true, "github:write"),
+  req("claude", "git", "github", "push hyperbeam/audit-csv-3ff6c49b", true, "github:write"),
   req("opencode", "egress", "pastebin", "POST pastebin.com", false, "not on the allowlist"),
   req("codex", "egress", "npm", "npm install", true, "allowlisted"),
-  req("gemini", "git", "github", "push nm/fix-nav", false, "Jordan can’t write to acme/web"),
+  req("gemini", "git", "github", "push hyperbeam/fix-nav-0c7d2e19", false, "Jordan can’t write to acme/web"),
   req("gemini", "tools", "linear", "linear: create issue", true, "linear:write"),
   req("claude", "egress", "metadata", "GET 169.254.169.254", false, "not on the allowlist"),
   req("opencode", "tools", "notion", "notion: append page", true, "notion:write"),
   req("codex", "tools", "github", "github: open pull request", false, "worker holds less than its conductor"),
   req("claude", "tools", "github", "github: open acme/api#418", true, "github:open_pr"),
   { kind: "revoke", owner: "PK", grant: "github:write", text: "Admin removed github:write from Priya" },
-  req("codex", "git", "github", "push nm/csv-ui", false, "Priya no longer holds github:write"),
-  req("claude", "git", "github", "push nm/audit-csv", false, "Priya no longer holds github:write"),
+  req("codex", "git", "github", "push hyperbeam/csv-ui-5b8e44a2", false, "Priya no longer holds github:write"),
+  req("claude", "git", "github", "push hyperbeam/audit-csv-3ff6c49b", false, "Priya no longer holds github:write"),
   req("gemini", "egress", "npm", "npm install", true, "allowlisted"),
   { kind: "restore", owner: "PK", grant: "github:write", text: "Admin gave github:write back to Priya" },
 ];

@@ -1,5 +1,5 @@
 import {
-  ArrowRight, BookOpen, Bot, Check, CircleCheck, Columns3, Copy, FilePen, FileText, GitPullRequest, Globe, KeyRound, Loader2, Menu, Moon,
+  ArrowRight, BellRing, BookOpen, Bot, Check, CircleCheck, Columns3, Copy, FilePen, FileText, GitPullRequest, Globe, KeyRound, Loader2, MessagesSquare, Menu, Moon,
   Network, NotebookPen, NotebookText, Package, ScrollText, Server, ShieldCheck, ShieldX, SquareKanban, Sun, Terminal, Users, Workflow,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -146,7 +146,7 @@ function Hero() {
             Your team’s coding agents, <span className="text-primary">working in the open.</span>
           </h1>
           <p className="max-w-[620px] text-[17px] leading-relaxed text-muted sm:text-[19px]">
-            Describe an outcome. An agent picks it up in its own sandbox, and everyone on the team can watch the scoping and the building as it happens.
+            Describe an outcome from the board, the command line, or a Slack or Discord thread. An agent picks it up in its own sandbox, with no more permission than you hold, and the whole team can watch it work.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
             <ButtonLink href={docs("quickstart")}>Run it on your laptop <ArrowRight /></ButtonLink>
@@ -191,7 +191,7 @@ function ProductDemo() {
           <Tool {...step(2)} icon={<FileText />} title="Read crates/server/src/api/audit.rs" />
           <Tool {...step(3)} icon={<FilePen />} title="Edit crates/server/src/api/audit.rs" diff="+64 −3" />
           <Tool {...step(4)} icon={<Terminal />} title="cargo test -p hyperbeam-server" />
-          <Gate {...step(5)} allowed text="github: push to nm/audit-csv" />
+          <Gate {...step(5)} allowed text="github: push to hyperbeam/audit-csv-3ff6c49b" />
           <Gate {...step(6)} allowed={false} text="egress to pastebin.com" />
           <div {...step(7)} className="text-[14px] leading-relaxed">
             The export is at <code className="rounded border border-border bg-surface-2 px-1 font-mono text-[12.5px]">/api/v1/audit.csv</code> and streams rows, so large logs don’t load into memory. Tests pass.
@@ -219,11 +219,10 @@ function ProductDemo() {
             </div>
           </div>
           <div>
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.07em] text-faint">Watching</div>
-            <div className="flex -space-x-1.5">
-              {[["PK", 282], ["JM", 160], ["AL", 30]].map(([n, h]) => (
-                <span key={n} className="grid size-6 place-items-center rounded-full text-[10px] font-semibold text-white ring-2 ring-surface" style={{ background: `oklch(0.58 0.12 ${h})` }}>{n}</span>
-              ))}
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.07em] text-faint">Started by</div>
+            <div className="flex items-center gap-2 text-muted">
+              <span className="grid size-6 place-items-center rounded-full text-[10px] font-semibold text-white" style={{ background: `oklch(0.58 0.12 ${PEOPLE.PK.hue})` }}>PK</span>
+              {PEOPLE.PK.name} · Claude Code
             </div>
           </div>
         </aside>
@@ -245,22 +244,28 @@ function Tool(props: { icon: ReactNode; title: string; diff?: string; "data-step
 
 function Gate(props: { allowed: boolean; text: string; "data-step"?: number }) {
   return (
-    <div data-step={props["data-step"]} className={cx("flex w-fit max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-[12.5px]", props.allowed ? "border-border bg-surface-2/60 text-muted" : "border-fail/30 bg-fail/8 text-fail")}>
+    <div data-step={props["data-step"]} className={cx("flex min-w-0 max-w-full items-center gap-1.5 justify-self-start rounded-md border px-2.5 py-1 text-[12.5px]", props.allowed ? "border-border bg-surface-2/60 text-muted" : "border-fail/30 bg-fail/8 text-fail")}>
       {props.allowed ? <ShieldCheck className="size-3.5 shrink-0 text-run" /> : <ShieldX className="size-3.5 shrink-0" />}
       <span className="font-medium">{props.allowed ? "Allowed" : "Blocked"}</span>
-      <span className="truncate">{props.text}</span>
+      <span className="min-w-0 truncate">{props.text}</span>
     </div>
   );
 }
 
 function Harnesses() {
   const names = ["Claude Code", "Codex", "Gemini CLI", "OpenCode"];
+  const tools = ["GitHub", "GitLab", "Linear", "Notion", "Slack", "Sentry", "Datadog", "PostHog", "Figma", "HubSpot"];
   return (
     <div className="border-y border-border bg-surface/40 px-4 py-8 sm:px-8">
       <div className="mx-auto flex max-w-[1160px] flex-wrap items-center justify-center gap-x-10 gap-y-4">
         <span className="text-[13px] text-faint">Runs the agents your team already uses</span>
         {names.map((n) => <span key={n} className="font-display text-[17px] font-semibold tracking-[-0.01em] text-muted">{n}</span>)}
         <a href={docs("harnesses")} className="text-[13.5px] text-primary hover:underline">or anything that speaks ACP →</a>
+      </div>
+      <div className="mx-auto mt-5 flex max-w-[1160px] flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[13.5px] text-muted">
+        <span className="text-[13px] text-faint">Reaches your tools through the gateway</span>
+        {tools.map((n) => <span key={n}>{n}</span>)}
+        <a href={docs("integrations")} className="text-primary hover:underline">or any MCP server →</a>
       </div>
     </div>
   );
@@ -270,7 +275,7 @@ function HowItWorks() {
   const steps = [
     {
       title: "Describe the outcome",
-      body: "Anyone on the team writes a brief from the board, the way they would brief a colleague. Pick the repositories, the agent, the model, and what it may do.",
+      body: "Anyone on the team writes a brief the way they would brief a colleague: on the board, at the command line, or by mentioning the bot in Slack or Discord. Pick the repositories, the agent, the model, and what it may do.",
       visual: (
         <div className="grid gap-2 text-[13px]">
           <div className="rounded-md border border-border-strong bg-background/50 px-3 py-2 leading-relaxed text-muted">Fix the flaky checkout test. Don’t change the payment mocks. Done when CI passes ten runs in a row.</div>
@@ -282,17 +287,17 @@ function HowItWorks() {
     },
     {
       title: "An agent works in its own sandbox",
-      body: "Each session gets a fresh, locked-down sandbox with only what it needs. Every tool call, file edit and blocked request is streamed to the page as it happens.",
+      body: "Each session gets a fresh, locked-down sandbox with your project’s toolchain. Every tool call, file edit and blocked request is streamed to the page as it happens, and when a decision is yours, the agent asks.",
       visual: (
         <div className="grid gap-1.5">
           <Tool icon={<Terminal />} title="npm test -- checkout" />
-          <Gate allowed text="github: push to nm/flaky-checkout" />
+          <Gate allowed text="github: push to hyperbeam/fix-checkout-9a41e07c" />
         </div>
       ),
     },
     {
       title: "The team reviews together",
-      body: "Workstreams move from scoping to building to review. Reply to an agent, add another one, discuss it with the team, and merge the pull request when it is right.",
+      body: "Workstreams move from scoping to building to review. Answer an agent’s questions, reply to it, add another one, discuss it with the team, and merge the pull request when it is right.",
       visual: (
         <div className="grid grid-cols-3 gap-1.5 text-[11.5px]">
           {[["Scoping", "bg-idle"], ["Building", "bg-run"], ["In review", "bg-wait"]].map(([s, dot], i) => (
@@ -312,7 +317,7 @@ function HowItWorks() {
       </SectionHead>
       <ol className="grid gap-4 md:grid-cols-3">
         {steps.map((s, i) => (
-          <li key={s.title} className="grid content-start gap-5 rounded-xl border border-border bg-surface p-6">
+          <li key={s.title} className="grid min-w-0 content-start gap-5 rounded-xl border border-border bg-surface p-6">
             <div className="flex items-center gap-3">
               <span className="grid size-7 place-items-center rounded-full bg-accent font-display text-[13px] font-bold text-accent-foreground">{i + 1}</span>
               <h3 className="font-display text-[17px] font-semibold tracking-[-0.01em]">{s.title}</h3>
@@ -329,11 +334,11 @@ function HowItWorks() {
 function Features() {
   const items = [
     { icon: <Columns3 />, title: "A shared board", body: "Every workstream, the agents on it, what each is doing right now, and the pull requests they produced. Live, for everyone." },
+    { icon: <MessagesSquare />, title: "From Slack and Discord", body: "Mention the bot to start an agent, reply in the thread to direct it, and answer its questions with a button. Each person acts as themselves." },
+    { icon: <BellRing />, title: "It asks when it needs you", body: "Agents ask when a decision is yours, and you hear when one of yours asks, finishes or fails: in Hyperbeam, or by direct message." },
     { icon: <Network />, title: "A conductor", body: "One agent scopes a request, starts worker agents across repositories, and is told as each reports back." },
-    { icon: <Bot />, title: "Any harness, any model", body: "Claude Code, Codex, Gemini CLI, OpenCode or your own ACP agent. Pick the model per session, or set a team default." },
-    { icon: <BookOpen />, title: "Skills", body: "How your team writes migrations, runs tests and reviews code, in the open SKILL.md format. Installed into every sandbox that needs them." },
-    { icon: <NotebookPen />, title: "Team notes", body: "Durable knowledge agents read and add to as they learn, so the next session starts out knowing more." },
-    { icon: <Terminal />, title: "A command line", body: "Start, follow, message and stop agents from your terminal or CI, with the same permissions as the UI." },
+    { icon: <Bot />, title: "Any harness, your toolchain", body: "Claude Code, Codex, Gemini CLI, OpenCode or your own ACP agent, on the model you pick, in an image with your project’s compilers and tools." },
+    { icon: <NotebookPen />, title: "Skills and team notes", body: "How your team writes migrations, runs tests and reviews code, in the open SKILL.md format, and notes agents add to as they learn." },
   ];
   return (
     <Section className="bg-surface/30">
@@ -359,13 +364,14 @@ function Security() {
     ["github:write", "push branches (not the default branch); comment; create issues"],
     ["github:open_pr", "open pull requests"],
     ["github:merge_pr", "merge pull requests; push to the default branch"],
-    ["linear:read · write", "read, or create, update and comment on issues"],
-    ["notion:read · write", "search and read, or create and edit pages"],
+    ["gitlab:read … merge_pr", "the same four on GitLab, where pull requests are merge requests"],
+    ["web:read", "read public web pages a person, a search or a fetched page pointed it to"],
+    ["<connection>:read · write", "use a connected service’s read or write tools, such as linear:write or sentry:read"],
   ];
   return (
     <Section id="security">
-      <SectionHead eyebrow="Security" title="Agents never hold your credentials">
-        A sandbox holds exactly one secret: a run token that identifies its session, revoked the moment the session ends. Everything it does outside the sandbox goes through Hyperbeam, which checks it and records it.
+      <SectionHead eyebrow="Security" title="Agents never hold your GitHub or tool credentials">
+        A sandbox holds a run token that identifies its session, revoked the moment the session ends, and the model API key its agent needs. Everything else it does outside the sandbox goes through Hyperbeam, which checks it, adds the credential, and records it.
       </SectionHead>
 
       <EgressScene />
@@ -380,7 +386,9 @@ function Security() {
             {[
               "A worker started by a conductor holds at most what the conductor holds.",
               "Anyone can watch a session. Only people who hold its grants can direct it.",
-              "Credentials are encrypted at rest and never enter a sandbox.",
+              "Agents read the web through the gateway, by default only at URLs a person, a search or an earlier page gave them, so a hostile page can’t get them to send your code out in a URL.",
+              "A custom MCP server’s tools stay hidden until an admin approves each one, and are hidden again if the server changes one.",
+              "Integration credentials are encrypted at rest and never enter a sandbox.",
             ].map((t) => <li key={t} className="flex gap-2.5"><Check className="mt-0.5 size-4 shrink-0 text-run" />{t}</li>)}
           </ul>
           <a href={docs("security")} className="mt-2 inline-flex items-center gap-1.5 text-[14px] text-primary hover:underline">How the security model works <ArrowRight className="size-3.5" /></a>
@@ -567,22 +575,23 @@ const HELM = `helm install hyperbeam deploy/helm/hyperbeam \\
 
 function SelfHost() {
   const points: [ReactNode, string, string][] = [
-    [<Server />, "Your cluster, your data", "The control plane and Postgres run in your Kubernetes cluster. Nothing leaves it except what your agents are allowed to reach."],
+    [<Server />, "Your infrastructure, your data", "The control plane and Postgres run where you put them. Nothing leaves except what your agents are allowed to reach."],
     [<ShieldCheck />, "Locked-down sandboxes", "One pod per live session, non-root, no service account token, no added capabilities, under the restricted Pod Security Standard."],
     [<Loader2 />, "Idle sandboxes go away", "Sandboxes are torn down after 15 idle minutes. A message wakes the session in a fresh one, from the branch it pushed."],
-    [<Users />, "Bring your own keys", "A team API key per harness, or each person’s own. Encrypted at rest with a master key only you hold."],
+    [<Users />, "Bring your own keys", "A team API key per harness, or each person’s own. Encrypted at rest with a master key you hold, or one wrapped by AWS KMS."],
   ];
   return (
     <Section id="self-host">
       <div className="grid gap-12 lg:grid-cols-2">
         <div className="min-w-0">
           <SectionHead eyebrow="Self-hosted" title="One Helm chart. Runs where your code does.">
-            Hyperbeam is open source under the Apache 2.0 license. Try it on a laptop in a few minutes, then install it on Kubernetes for the team.
+            Open source under the Apache 2.0 license, with images published for amd64 and arm64. Install the chart on any Kubernetes cluster, on one EC2 instance with the Terraform module, or on a Raspberry Pi.
           </SectionHead>
           <CodeBlock code={HELM} lang="bash" title="Install" />
           <div className="mt-5 flex flex-wrap gap-3">
             <ButtonLink href={docs("install-kubernetes")} variant="secondary">Install on Kubernetes <ArrowRight /></ButtonLink>
-            <ButtonLink href={docs("quickstart")} variant="ghost">Or try it locally</ButtonLink>
+            <ButtonLink href={docs("install-aws")} variant="ghost">On AWS</ButtonLink>
+            <ButtonLink href={docs("install-raspberry-pi")} variant="ghost">On a Raspberry Pi</ButtonLink>
           </div>
         </div>
         <ul className="grid content-start gap-3 sm:grid-cols-2 lg:mt-24">
@@ -606,15 +615,16 @@ function Status() {
         <div>
           <div className="eyebrow mb-2">Tested</div>
           <h2 className="font-display text-[24px] font-semibold tracking-[-0.02em]">Tested end to end</h2>
-          <p className="mt-2 text-[14.5px] leading-relaxed text-muted">The control plane, runner and CLI are covered by end-to-end tests against a real server, real runners and a real git backend, and the Helm chart is exercised on Kubernetes.</p>
+          <p className="mt-2 text-[14.5px] leading-relaxed text-muted">End-to-end tests run a real server and real runners driving a scripted agent, against stand-ins for GitHub, GitLab, MCP servers, Slack and Discord. The Helm chart is checked by hand on Kubernetes.</p>
           <a href={docs("status")} className="mt-3 inline-flex items-center gap-1.5 text-[14px] text-primary hover:underline">Testing and limits <ArrowRight className="size-3.5" /></a>
         </div>
         <ul className="grid content-start gap-2.5 text-[14px]">
           {[
-            "Permissions, sign-up, invites and roles",
-            "The full session lifecycle through the runner and ACP",
-            "Cloning and pushing through the git proxy, with default-branch protection",
-            "Opening pull requests through the gateway; denial and audit",
+            "Permissions, invites, roles and immediate revocation",
+            "The full session lifecycle through the runner and ACP, including resume",
+            "The git proxy with default-branch protection; pull and merge requests",
+            "Conductors, questions and notifications",
+            "MCP connections, OAuth sign-in, web access and the egress allowlist",
           ].map((t) => <li key={t} className="flex gap-2.5"><CircleCheck className="mt-0.5 size-4 shrink-0 text-run" />{t}</li>)}
         </ul>
       </div>
@@ -630,7 +640,7 @@ function FinalCta() {
         <BrandMark size={48} />
         <p className="font-display text-[15px] font-semibold tracking-[-0.01em] text-primary">Because it’s the best move.</p>
         <h2 className="font-display text-[32px] font-semibold leading-tight tracking-[-0.03em] sm:text-[42px]">Give your agents a place the team can see.</h2>
-        <p className="text-[16px] text-muted">Run it on your laptop and connect your first agent in a few minutes.</p>
+        <p className="text-[16px] text-muted">Run it on your laptop and connect your first agent, then install it for the team.</p>
         <div className="flex flex-wrap justify-center gap-3">
           <ButtonLink href={docs("quickstart")}>Get started <ArrowRight /></ButtonLink>
           {REPO_URL && <ButtonLink href={REPO_URL} variant="secondary"><GitHubIcon /> View the source</ButtonLink>}
@@ -643,7 +653,7 @@ function FinalCta() {
 function Footer() {
   const cols: [string, [string, string][]][] = [
     ["Product", [["How it works", "#how"], ["Security", "#security"], ["Self-host", "#self-host"]]],
-    ["Docs", [["Quick start", docs("quickstart")], ["Concepts", docs("concepts")], ["Install on Kubernetes", docs("install-kubernetes")], ["Command line", docs("cli")]]],
+    ["Docs", [["Quick start", docs("quickstart")], ["Concepts", docs("concepts")], ["Install on Kubernetes", docs("install-kubernetes")], ["Slack and Discord", docs("chat")], ["Security model", docs("security")]]],
     ["Project", [["Testing and limits", docs("status")], ["Development", docs("development")], ...(REPO_URL ? [["Source", REPO_URL] as [string, string]] : [])]],
   ];
   return (

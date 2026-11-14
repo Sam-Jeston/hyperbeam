@@ -25,7 +25,7 @@ export async function build() {
   const { Page } = await import(`./src/page.tsx?${Date.now()}`);
   const body = renderToStaticMarkup(Page());
   const title = "Hyperbeam · Your team’s coding agents, working in the open";
-  const description = "A self-hosted platform where a team’s coding agents work in the open. Any ACP agent, permissions that belong to people, and agents that never hold your credentials.";
+  const description = "A self-hosted platform where a team’s coding agents work in the open. Start agents from the board, the CLI, Slack or Discord; each runs in its own sandbox with only its owner's permissions, and never holds your GitHub or tool credentials.";
   const html = `<!doctype html>
 <html lang="en" class="dark">
 <head>

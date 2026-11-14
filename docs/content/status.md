@@ -19,6 +19,11 @@ The end-to-end tests start a real server, real runner processes driving a script
 - immediate revocation;
 - resuming after teardown;
 - conductor delegation;
+- questions from agents, answered by people or, for a worker, by its conductor;
+- notifications when an agent asks, finishes a turn or fails, in Hyperbeam and by chat direct message;
+- reading the web through the gateway’s `web_fetch`, with its URL rules;
+- choosing an environment per repository, and running setup commands;
+- the master key: generated and wrapped on first start, and rotated between a direct key and wrapped ones;
 - Slack and Discord against stand-ins for both: linking by email and by one-time link, refusing people who are not linked, starting agents in enabled channels, replies, questions answered with buttons, and stopping;
 - model selection;
 - the egress allowlist.
@@ -40,4 +45,5 @@ On a local `kind` cluster (Kubernetes 1.34) with the Helm chart:
 - Sign-in is email and password only (no OIDC yet).
 - A connection has one credential or one OAuth sign-in, shared by every agent, so agents act as that one account. Stdio-only MCP servers can’t be connected yet.
 - Workspaces are ephemeral, so work survives a teardown only if it was pushed.
-- The Slack and Discord apps are tested against stand-ins, not yet against the live services. One workspace or server set-up per installation; a session started on the web does not notify its owner in chat.
+- The Slack and Discord apps are tested against stand-ins, not yet against the live services. One workspace or server set-up per installation.
+- The command line has no automated tests of its own; the API it calls is covered.

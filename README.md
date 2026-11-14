@@ -304,7 +304,9 @@ Covered by automated tests: the permission model; sign-up, invites and roles; th
 lifecycle through the runner and ACP; cloning and pushing through the git
 proxy, including default-branch protection; opening pull requests through the gateway; denial and
 audit of what is not permitted; immediate revocation; resume after teardown; conductor delegation;
-model selection; and the egress allowlist.
+GitLab alongside GitHub; MCP connections and OAuth sign-in against fake servers; questions and
+notifications; web access through `web_fetch`; environments and setup commands; master key wrapping
+and rotation; Slack and Discord against stand-ins; model selection; and the egress allowlist.
 
 Verified by hand on a local `kind` cluster (Kubernetes 1.34) with the Helm chart: the control plane
 and bundled Postgres come up; a session runs in its own pod as a non-root user with no service account
