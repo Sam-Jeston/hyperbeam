@@ -38,6 +38,12 @@ pub trait SandboxDriver: Send + Sync {
     /// What can be seen of where sandboxes run, for the Cluster page. Never
     /// fails as a whole: each part that could not be read says why.
     async fn inspect(&self) -> Inspection;
+    /// Fetch `image` afresh onto every ready node, so the next sandbox that
+    /// starts from it runs what its tag names now. Returns once the pulls are
+    /// under way, with how many nodes they are on; `inspect` reports progress.
+    async fn pull(&self, _image: &str) -> Result<usize> {
+        anyhow::bail!("this driver runs no images")
+    }
 }
 
 /// A driver's view of where sandboxes run, as far as it is allowed to look.
@@ -52,6 +58,28 @@ pub struct Inspection {
     /// Newest first.
     pub events: Vec<EventInfo>,
     pub events_error: Option<String>,
+    /// Image pulls asked for from the Cluster page, the latest per image and node.
+    pub pulls: Vec<PullInfo>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullState {
+    Pulling,
+    Pulled,
+    Failed,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PullInfo {
+    /// As it was asked for.
+    pub image: String,
+    pub node: String,
+    pub state: PullState,
+    /// Why it failed, when it did.
+    pub message: String,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Default, Serialize)]

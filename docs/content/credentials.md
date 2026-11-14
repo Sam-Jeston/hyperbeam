@@ -119,7 +119,7 @@ On Kubernetes, run the command in the server’s pod, where the current settings
 ```bash
 NEW=$(openssl rand -base64 32)
 kubectl -n hyperbeam exec deploy/hyperbeam -- hyperbeam-server rotate-master-key --new-master-key "$NEW"
-helm upgrade hyperbeam deploy/helm/hyperbeam -n hyperbeam --reuse-values --set masterKey="$NEW"
+helm upgrade hyperbeam deploy/helm/hyperbeam -n hyperbeam --reset-then-reuse-values --set masterKey="$NEW"
 ```
 
 If you manage the Secret yourself (`existingSecret`), update its `master-key` and restart the deployment instead.

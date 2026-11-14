@@ -130,7 +130,7 @@ ensure_release() {
   if helm status hyperbeam --kube-context "$CTX" -n "$NS" >/dev/null 2>&1; then
     # The chart keeps the master key and Postgres password from the existing Secret.
     log "Upgrading the Helm release (applies chart changes)"
-    args+=(--reuse-values)
+    args+=(--reset-then-reuse-values)
   else
     if [[ ! -s $KEY_FILE ]]; then
       log "Creating master key at $KEY_FILE (back it up)"

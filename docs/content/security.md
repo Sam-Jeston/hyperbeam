@@ -47,7 +47,7 @@ A sandbox holds your source code, and a page an agent reads can try to instruct 
 
 A conductor and its workers share what they may fetch. A URL a conductor writes to a worker does not count.
 
-Admins choose between this, **only the listed sites**, and **none**. An agent needs the `web:read` grant in every case.
+Admins choose between this, **any public page**, **only the listed sites**, and **none**. An agent needs the `web:read` grant in every case. With **any public page**, an agent can fetch any URL on the public internet, including one it wrote. That removes the protection above: a page that instructs an agent can get it to send what it holds to any site in a URL. The other checks below still apply, and every fetch is still recorded.
 
 `web_fetch` makes `GET` requests only, sends no credentials, and refuses URLs that carry a username or password. It refuses any address that is not on the public internet (loopback, private networks, link-local and cloud metadata addresses), checks every redirect the same way, and pins each request to the address it checked. It reads at most 2 MB of a text response, and a session can fetch 30 pages a minute.
 
@@ -59,7 +59,7 @@ What this does not stop:
 
 ## The sandbox itself
 
-Each Kubernetes sandbox is a pod that runs as a non-root user, with no service account token and no added capabilities, under the `restricted` Pod Security Standard, with CPU, memory and disk limits. The control plane’s own permissions in the sandbox namespace are limited to creating and deleting pods and their token secrets, and reading events. Outside it, it may list the cluster’s nodes, for the [Cluster page](/install-kubernetes#see-how-the-cluster-is-doing), unless you turn that off.
+Each Kubernetes sandbox is a pod that runs as a non-root user, with no service account token and no added capabilities, under the `restricted` Pod Security Standard, with CPU, memory and disk limits. The control plane’s own permissions in the sandbox namespace are limited to creating and deleting pods and their token secrets, and reading events. Besides sandboxes, the only pods it creates are the short-lived ones that pull an image when an admin asks from the Cluster page. They run the same images under the same restrictions, do nothing but start, and have no network access at all. Outside it, it may list the cluster’s nodes, for the [Cluster page](/install-kubernetes#see-how-the-cluster-is-doing), unless you turn that off.
 
 ## The audit log
 

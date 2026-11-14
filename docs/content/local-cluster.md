@@ -108,7 +108,7 @@ docker build -f deploy/docker/Dockerfile --target server -t hyperbeam/server:$TA
 docker build -f deploy/docker/Dockerfile --target runner -t hyperbeam/runner:$TAG .
 kind load docker-image --name hyperbeam hyperbeam/server:$TAG hyperbeam/runner:$TAG
 
-helm upgrade hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --reuse-values \
+helm upgrade hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --reset-then-reuse-values \
   --set image.tag=$TAG --set agents.runnerImage.tag=$TAG
 ```
 
@@ -135,7 +135,7 @@ kubectl -n hyperbeam exec statefulset/hyperbeam-postgres -- \
 To run Postgres outside the cluster, set `database.url` and turn off the bundled one. From a kind cluster, the Docker host is usually reachable at `host.docker.internal` on Docker Desktop, or at the `kind` network’s gateway (often `172.18.0.1`) on Linux. Make sure Postgres listens on that address, not only on `127.0.0.1`.
 
 ```bash
-helm upgrade hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --reuse-values \
+helm upgrade hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --reset-then-reuse-values \
   --set postgres.enabled=false \
   --set database.url=postgres://hyperbeam:PASSWORD@host.docker.internal:5432/hyperbeam
 ```

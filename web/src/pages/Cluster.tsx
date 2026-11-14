@@ -1,10 +1,10 @@
-import { Boxes, CircleCheck, RefreshCw, Server, TriangleAlert } from "lucide-react";
+import { Boxes, CircleCheck, Download, RefreshCw, Server, TriangleAlert } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/controls";
 import { Tooltip } from "../components/ui/menu";
 import { Badge, Card, EmptyState, Notice, Skeleton } from "../components/ui/surface";
-import { api, type Cluster, type ClusterImage, type ClusterNode, type ClusterSandbox } from "../lib/api";
+import { api, type Cluster, type ClusterImage, type ClusterNode, type ClusterPull, type ClusterSandbox } from "../lib/api";
 import { A, ErrorNote, Page, PageHeader, SectionTitle, Time, useDocumentTitle, useLoad } from "../lib/ui";
 import { cn } from "../lib/utils";
 
@@ -63,13 +63,37 @@ export function ClusterPage() {
           <Skeleton className="h-40 rounded-lg" />
         </div>
       )}
-      {data && <ClusterBody cluster={data} />}
+      {data && <ClusterBody cluster={data} reload={reload} />}
     </Page>
   );
 }
 
-function ClusterBody({ cluster }: { cluster: Cluster }) {
+/** Asking nodes to fetch images afresh, and what went wrong asking. */
+function usePulls(reload: () => void) {
+  const [asking, setAsking] = useState<Set<string>>(new Set());
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const pull = async (images: string[]) => {
+    setAsking((a) => new Set([...a, ...images]));
+    for (const image of images) {
+      try {
+        await api.post("/cluster/images/pull", { image });
+        setErrors(({ [image]: _, ...rest }) => rest);
+      } catch (e) {
+        setErrors((r) => ({ ...r, [image]: e instanceof Error ? e.message : String(e) }));
+      }
+    }
+    setAsking((a) => new Set([...a].filter((i) => !images.includes(i))));
+    reload();
+  };
+  return { asking, errors, pull };
+}
+
+const pulling = (image: ClusterImage) => image.pulls.some((p) => p.state === "pulling");
+
+function ClusterBody({ cluster, reload }: { cluster: Cluster; reload: () => void }) {
   const kubernetes = cluster.driver === "kubernetes";
+  const pulls = usePulls(reload);
+  const idle = cluster.images.filter((i) => !pulling(i) && !pulls.asking.has(i.image));
   const badNodes = cluster.nodes.filter((n) => !nodeHealthy(n));
   const failing = cluster.sandboxes.filter((s) => s.state === "failing");
   const badImages = cluster.images.filter((i) => i.pull_error);
@@ -127,9 +151,31 @@ function ClusterBody({ cluster }: { cluster: Cluster }) {
 
       {kubernetes && (
         <section>
-          <SectionTitle description={imagesBlurb(cluster)}>Images</SectionTitle>
+          <SectionTitle
+            description={imagesBlurb(cluster)}
+            action={
+              cluster.images.length > 1 && (
+                <Tooltip content="Fetch every image again from its registry onto each ready node.">
+                  <Button size="sm" disabled={idle.length === 0} onClick={() => pulls.pull(idle.map((i) => i.image))}>
+                    <Download /> Pull all
+                  </Button>
+                </Tooltip>
+              )
+            }
+          >
+            Images
+          </SectionTitle>
           <Card className="divide-y divide-border">
-            {cluster.images.map((image) => <ImageRow key={image.image} image={image} cluster={cluster} />)}
+            {cluster.images.map((image) => (
+              <ImageRow
+                key={image.image}
+                image={image}
+                cluster={cluster}
+                asking={pulls.asking.has(image.image)}
+                error={pulls.errors[image.image]}
+                onPull={() => pulls.pull([image.image])}
+              />
+            ))}
           </Card>
         </section>
       )}
@@ -156,7 +202,7 @@ function imagesBlurb(cluster: Cluster): string {
   const base = "What sandboxes start from: the runner, each harness, and each environment.";
   if (policy === "Always") return `${base} The pull policy is Always, so each sandbox checks the registry when it starts.`;
   if (policy === "Never") return `${base} The pull policy is Never, so an image a node lacks cannot be used there.`;
-  return `${base} An image a node has not pulled is downloaded when the first sandbox needs it.`;
+  return `${base} An image a node has not pulled is downloaded when the first sandbox needs it. Pull one to fetch what its tag names now, such as a newer latest.`;
 }
 
 function Stat(props: { label: string; value: string; tone?: "run" | "wait" | "fail"; icon?: ReactNode; hint?: string }) {
@@ -206,7 +252,19 @@ function NodeRow({ node }: { node: ClusterNode }) {
 
 const USE_LABEL = { runner: "Runner", harness: "Harness", environment: "Environment" };
 
-function ImageRow({ image, cluster }: { image: ClusterImage; cluster: Cluster }) {
+function PullLine({ pull, several }: { pull: ClusterPull; several: boolean }) {
+  const on = several ? ` on ${pull.node}` : "";
+  if (pull.state === "pulling") return <div className="text-[12.5px] text-wait">Pulling{on}…</div>;
+  if (pull.state === "failed") return <div className="text-[12.5px] text-fail [overflow-wrap:anywhere]">Pull failed{on}: {pull.message}</div>;
+  return (
+    <div className="text-[12.5px] text-run">
+      Pulled afresh{on} <Time iso={pull.finished_at ?? pull.started_at} />
+    </div>
+  );
+}
+
+function ImageRow(props: { image: ClusterImage; cluster: Cluster; asking: boolean; error?: string; onPull: () => void }) {
+  const { image, cluster } = props;
   const standing = imageStanding(image);
   const present = image.nodes.filter((n) => n.state === "present");
   const several = image.nodes.length > 1;
@@ -237,10 +295,17 @@ function ImageRow({ image, cluster }: { image: ClusterImage; cluster: Cluster })
           ))}
         </div>
         {image.pull_error && <div className="text-[12.5px] text-fail [overflow-wrap:anywhere]">{image.pull_error}</div>}
+        {image.pulls.map((pull) => <PullLine key={pull.node} pull={pull} several={several} />)}
+        {props.error && <div className="text-[12.5px] text-fail [overflow-wrap:anywhere]">Could not start a pull: {props.error}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {size ? <span className="hidden text-[12px] tabular-nums text-faint sm:inline">{bytes(size)}</span> : null}
         {where ? <Tooltip content={where}>{badge}</Tooltip> : standing === "unknown" ? <Tooltip content={unknownWhy}>{badge}</Tooltip> : badge}
+        <Tooltip content="Fetch this image again from its registry onto each ready node, so new sandboxes start from what its tag names now.">
+          <Button size="icon-sm" variant="ghost" aria-label={`Pull ${image.image}`} loading={props.asking || pulling(image)} onClick={props.onPull}>
+            {!(props.asking || pulling(image)) && <Download />}
+          </Button>
+        </Tooltip>
       </div>
     </div>
   );

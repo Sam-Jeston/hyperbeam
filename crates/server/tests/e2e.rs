@@ -1058,6 +1058,13 @@ async fn agents_read_the_web_through_the_gateway() {
     // What one session found is not another's to fetch.
     assert!(fetch_output(&events, "/site/guide").starts_with("Denied"));
 
+    // Any public page: a URL the agent wrote itself is fetched.
+    owner.ok(Method::PUT, "/settings", Some(json!({ "web_access": { "mode": "any" } }))).await;
+    let created = owner.post("/sessions", json!({ "prompt": unwritten("guide"), "harness": "scripted" })).await;
+    let events = owner.wait_turns(created["session"]["id"].as_str().unwrap(), 1).await;
+    assert!(!fetch_output(&events, "/site/guide").starts_with("Denied"), "{}", fetch_output(&events, "/site/guide"));
+    owner.ok(Method::PUT, "/settings", Some(json!({ "web_access": { "mode": "known" } }))).await;
+
     // Someone without the permission has no such tool.
     let mia = h.member(&owner, "mia@example.com", &[]).await;
     let created = mia.post("/sessions", json!({ "prompt": format!("!tools\n{}", fetch("docs")), "harness": "scripted" })).await;

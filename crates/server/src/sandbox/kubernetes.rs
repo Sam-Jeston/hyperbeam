@@ -6,7 +6,10 @@
 //! is an environment, and whatever the image keeps in the home directory,
 //! which the pod's own writable home would otherwise hide.
 
-use super::{ContainerInfo, EventInfo, Inspection, LaunchRequest, NodeImage, NodeInfo, SandboxDriver, SandboxInfo, SandboxState};
+use super::{
+    ContainerInfo, EventInfo, Inspection, LaunchRequest, NodeImage, NodeInfo, PullInfo, PullState, SandboxDriver, SandboxInfo,
+    SandboxState, normalize_image,
+};
 use crate::config::Config;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -16,9 +19,18 @@ use k8s_openapi::api::core::v1::{ContainerStatus, Event, Node, Pod, Secret};
 use kube::api::{Api, DeleteParams, ListParams, PostParams};
 use kube::{Client, ResourceExt};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const SESSION_LABEL: &str = "hyperbeam.dev/session";
+/// On image pull pods: which image and node they are for, as a short hash.
+const PULL_LABEL: &str = "hyperbeam.dev/pull";
+/// On image pull pods: the image as it was asked for.
+const IMAGE_ANNOTATION: &str = "hyperbeam.dev/image";
+/// A finished pull stays on the Cluster page this long; then its pod goes.
+const PULL_KEEP_SECS: i64 = 10 * 60;
+/// A pull still going after this long is given up on.
+const PULL_GIVE_UP_SECS: i64 = 60 * 60;
 const RUNNER_PATH: &str = "/hyperbeam/bin/hyperbeam-runner";
 const HOME: &str = "/home/agent";
 const HOME_SIZE: &str = "2Gi";
@@ -363,6 +375,116 @@ pub fn sandbox_info(pod: &Pod, now: DateTime<Utc>) -> SandboxInfo {
     }
 }
 
+/// Which pull pods are for the same image on the same node.
+fn pull_key(image: &str, node: &str) -> String {
+    let digest = Sha256::digest(format!("{}\n{node}", normalize_image(image)));
+    hex::encode(&digest[..8])
+}
+
+/// A pod that only makes `node` fetch `image` again. Its one container runs
+/// the image with `imagePullPolicy: Always`, which is what makes the kubelet
+/// ask the registry, and does nothing but print the runner's version.
+pub fn pull_pod_manifest(settings: &PodSettings, image: &str, node: &str) -> serde_json::Value {
+    let key = pull_key(image, node);
+    let suffix = &Uuid::new_v4().simple().to_string()[..6];
+    let hardened = json!({ "allowPrivilegeEscalation": false, "capabilities": { "drop": ["ALL"] } });
+    json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": format!("pull-{key}-{suffix}"),
+            "labels": {
+                "app.kubernetes.io/managed-by": "hyperbeam",
+                "hyperbeam.dev/role": "image-pull",
+                PULL_LABEL: key,
+            },
+            "annotations": { IMAGE_ANNOTATION: image },
+        },
+        "spec": {
+            "nodeName": node,
+            "restartPolicy": "Never",
+            "automountServiceAccountToken": false,
+            "enableServiceLinks": false,
+            "terminationGracePeriodSeconds": 0,
+            "securityContext": {
+                "runAsNonRoot": true,
+                "runAsUser": 1000,
+                "runAsGroup": 1000,
+                "seccompProfile": { "type": "RuntimeDefault" },
+            },
+            "initContainers": [{
+                "name": "runner",
+                "image": settings.runner_image,
+                "imagePullPolicy": settings.pull_policy,
+                "command": ["/hyperbeam-runner", "install", RUNNER_PATH],
+                "volumeMounts": [{ "name": "hyperbeam-bin", "mountPath": "/hyperbeam/bin" }],
+                "securityContext": hardened,
+                "resources": { "limits": { "cpu": "200m", "memory": "64Mi" } },
+            }],
+            "containers": [{
+                "name": "pull",
+                "image": image,
+                "imagePullPolicy": "Always",
+                "command": [RUNNER_PATH, "--version"],
+                "volumeMounts": [{ "name": "hyperbeam-bin", "mountPath": "/hyperbeam/bin", "readOnly": true }],
+                "securityContext": hardened,
+                "resources": { "limits": { "cpu": "200m", "memory": "64Mi" } },
+            }],
+            "volumes": [{ "name": "hyperbeam-bin", "emptyDir": {} }],
+        },
+    })
+}
+
+/// How far a pull pod has got. The image is on the node once its container
+/// has been created, whatever the container then did.
+pub fn pull_info(pod: &Pod) -> PullInfo {
+    let status = pod.status.as_ref();
+    let init = status.and_then(|s| s.init_container_statuses.as_deref()).unwrap_or_default();
+    let main = status.and_then(|s| s.container_statuses.as_deref()).unwrap_or_default();
+    let pull = main.iter().find(|c| c.name == "pull");
+    let failed_pull = init.iter().map(|c| container_info(c, true)).chain(pull.map(|c| container_info(c, false))).find(|c| c.pull_failed());
+    let failed_runner = init.iter().map(|c| container_info(c, true)).find(|c| c.state == "terminated" && c.exit_code != Some(0));
+    let pulled = pull.is_some_and(|c| {
+        let info = container_info(c, false);
+        info.state != "waiting" || matches!(info.reason.as_str(), "CreateContainerError" | "RunContainerError")
+    });
+    let phase = status.and_then(|s| s.phase.as_deref()).unwrap_or_default();
+
+    let (state, message) = if let Some(c) = failed_pull {
+        let message = if c.message.is_empty() { c.reason } else { c.message };
+        (PullState::Failed, if c.init { format!("the runner image could not be pulled: {message}") } else { message })
+    } else if pulled {
+        (PullState::Pulled, String::new())
+    } else if failed_runner.is_some() {
+        (PullState::Failed, "the runner could not be installed".to_string())
+    } else if phase == "Failed" {
+        (PullState::Failed, status.and_then(|s| s.message.clone().or(s.reason.clone())).unwrap_or_else(|| "the pull pod failed".into()))
+    } else {
+        (PullState::Pulling, String::new())
+    };
+    let finished_at = pull
+        .and_then(|c| c.state.as_ref()?.terminated.as_ref()?.finished_at.as_ref())
+        .map(|t| t.0)
+        .or_else(|| pull.and_then(|c| c.state.as_ref()?.running.as_ref()?.started_at.as_ref()).map(|t| t.0));
+    PullInfo {
+        image: pod.annotations().get(IMAGE_ANNOTATION).cloned().unwrap_or_default(),
+        node: pod.spec.as_ref().and_then(|s| s.node_name.clone()).unwrap_or_default(),
+        state,
+        message,
+        started_at: pod.metadata.creation_timestamp.as_ref().map(|t| t.0),
+        finished_at: if state == PullState::Pulled { finished_at } else { None },
+    }
+}
+
+/// Whether a pull pod has served its purpose and can go.
+fn pull_expired(info: &PullInfo, now: DateTime<Utc>) -> bool {
+    let age = |at: Option<DateTime<Utc>>| at.map(|at| (now - at).num_seconds()).unwrap_or(i64::MAX);
+    match info.state {
+        PullState::Pulling => age(info.started_at) > PULL_GIVE_UP_SECS,
+        _ => age(info.finished_at.or(info.started_at)) > PULL_KEEP_SECS,
+    }
+}
+
 fn event_info(event: &Event) -> EventInfo {
     let ts = event
         .last_timestamp
@@ -459,7 +581,9 @@ impl SandboxDriver for KubernetesDriver {
         let events: Api<Event> = Api::namespaced(self.client.clone(), &self.namespace);
         let everything = ListParams::default();
         let agents = ListParams::default().labels("hyperbeam.dev/role=agent");
-        let (nodes, pods, events) = tokio::join!(nodes.list(&everything), pods.list(&agents), events.list(&everything));
+        let pulling = ListParams::default().labels("hyperbeam.dev/role=image-pull");
+        let (nodes, sandbox_pods, pull_pods, events) =
+            tokio::join!(nodes.list(&everything), pods.list(&agents), pods.list(&pulling), events.list(&everything));
 
         let mut inspection = Inspection { namespace: Some(self.namespace.clone()), ..Default::default() };
         match nodes {
@@ -469,7 +593,7 @@ impl SandboxDriver for KubernetesDriver {
             }
             Err(err) => inspection.nodes_error = Some(list_error("nodes", &err)),
         }
-        match pods {
+        match sandbox_pods {
             Ok(list) => {
                 let now = Utc::now();
                 inspection.sandboxes = list.items.iter().map(|pod| sandbox_info(pod, now)).collect();
@@ -485,7 +609,40 @@ impl SandboxDriver for KubernetesDriver {
             }
             Err(err) => inspection.events_error = Some(list_error("events", &err)),
         }
+        // Pulls: the latest per image and node. Pods that have served their
+        // purpose are removed here, as the page that shows them looks.
+        if let Ok(list) = pull_pods {
+            let now = Utc::now();
+            let mut list: Vec<&Pod> = list.items.iter().filter(|pod| pod.metadata.deletion_timestamp.is_none()).collect();
+            list.sort_by_key(|pod| std::cmp::Reverse(pod.metadata.creation_timestamp.as_ref().map(|t| t.0)));
+            let mut seen = std::collections::HashSet::new();
+            for pod in list {
+                let info = pull_info(pod);
+                let latest = seen.insert(pod.labels().get(PULL_LABEL).cloned().unwrap_or_default());
+                if !latest || pull_expired(&info, now) {
+                    let (pods, name) = (pods.clone(), pod.name_any());
+                    tokio::spawn(async move { pods.delete(&name, &DeleteParams::default()).await.ok() });
+                } else {
+                    inspection.pulls.push(info);
+                }
+            }
+        }
         inspection
+    }
+
+    async fn pull(&self, image: &str) -> Result<usize> {
+        let nodes: Api<Node> = Api::all(self.client.clone());
+        let pods: Api<Pod> = Api::namespaced(self.client.clone(), &self.namespace);
+        let nodes = nodes.list(&ListParams::default()).await.map_err(|err| anyhow::anyhow!(list_error("nodes", &err)))?;
+        let ready: Vec<String> = nodes.items.iter().map(node_info).filter(|n| n.ready).map(|n| n.name).collect();
+        anyhow::ensure!(!ready.is_empty(), "no node is ready to pull onto");
+        for node in &ready {
+            // An earlier pull of the same image here is superseded, and
+            // removed by `inspect`, which shows only the latest.
+            let pod: Pod = serde_json::from_value(pull_pod_manifest(&self.settings, image, node))?;
+            pods.create(&PostParams::default(), &pod).await.with_context(|| format!("could not start a pull on {node}"))?;
+        }
+        Ok(ready.len())
     }
 }
 
@@ -663,5 +820,56 @@ mod tests {
         assert_eq!(info.problems, ["DiskPressure: kubelet has disk pressure"]);
         assert_eq!((info.arch.as_str(), info.memory_bytes), ("arm64", Some(8052292 * 1024)));
         assert_eq!(info.images[0].size_bytes, Some(1000));
+    }
+
+    fn pull_pod(status: serde_json::Value) -> Pod {
+        let mut manifest = pull_pod_manifest(&settings(), "ghcr.io/acme/dev:latest", "pi");
+        manifest["metadata"]["creationTimestamp"] = json!("2026-01-01T00:00:00Z");
+        manifest["status"] = status;
+        serde_json::from_value(manifest).expect("a pod")
+    }
+
+    #[test]
+    fn a_pull_pod_fetches_the_image_afresh_on_one_node() {
+        let pod = pull_pod(json!({}));
+        let spec = pod.spec.as_ref().unwrap();
+        assert_eq!(spec.node_name.as_deref(), Some("pi"));
+        assert_eq!(spec.security_context.as_ref().unwrap().run_as_non_root, Some(true));
+        let pull = &spec.containers[0];
+        assert_eq!((pull.image.as_deref(), pull.image_pull_policy.as_deref()), (Some("ghcr.io/acme/dev:latest"), Some("Always")));
+        assert_eq!(pull.security_context.as_ref().unwrap().allow_privilege_escalation, Some(false));
+        // Not a sandbox: neither listed as one nor cleaned up as an orphan.
+        assert_eq!(pod.labels()["hyperbeam.dev/role"], "image-pull");
+        assert!(!pod.labels().contains_key(SESSION_LABEL));
+        // However the image is spelled, it is the same pull.
+        assert_eq!(pull_key("ghcr.io/acme/dev", "pi"), pod.labels()[PULL_LABEL]);
+        assert_ne!(pull_key("ghcr.io/acme/dev", "pi2"), pod.labels()[PULL_LABEL]);
+    }
+
+    #[test]
+    fn a_pull_is_done_once_its_container_exists() {
+        let runner_done = json!({ "name": "runner", "image": "runner:1", "imageID": "", "ready": false, "restartCount": 0,
+                                  "state": { "terminated": { "exitCode": 0 } } });
+        let with = |state: serde_json::Value| {
+            pull_info(&pull_pod(json!({
+                "phase": "Pending",
+                "initContainerStatuses": [runner_done],
+                "containerStatuses": [{ "name": "pull", "image": "ghcr.io/acme/dev:latest", "imageID": "", "ready": false, "restartCount": 0, "state": state }],
+            })))
+        };
+        assert_eq!(with(json!({ "waiting": { "reason": "ContainerCreating" } })).state, PullState::Pulling);
+        let failed = with(json!({ "waiting": { "reason": "ErrImagePull", "message": "not found" } }));
+        assert_eq!((failed.state, failed.message.as_str()), (PullState::Failed, "not found"));
+        let pulled = with(json!({ "terminated": { "exitCode": 0, "finishedAt": "2026-01-01T00:01:00Z" } }));
+        assert_eq!((pulled.state, pulled.finished_at), (PullState::Pulled, Some(at(60))));
+        // An image with nothing the runner can run on is still on the node.
+        assert_eq!(with(json!({ "waiting": { "reason": "RunContainerError" } })).state, PullState::Pulled);
+        assert_eq!((pulled.image.as_str(), pulled.node.as_str()), ("ghcr.io/acme/dev:latest", "pi"));
+
+        assert!(!pull_expired(&pulled, at(60 + PULL_KEEP_SECS)));
+        assert!(pull_expired(&pulled, at(61 + PULL_KEEP_SECS)));
+        let pulling = with(json!({ "waiting": { "reason": "ContainerCreating" } }));
+        assert!(!pull_expired(&pulling, at(PULL_KEEP_SECS * 2)));
+        assert!(pull_expired(&pulling, at(PULL_GIVE_UP_SECS + 1)));
     }
 }

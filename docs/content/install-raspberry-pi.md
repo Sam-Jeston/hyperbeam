@@ -108,7 +108,7 @@ The script sets two limits that suit an 8 GB machine: 3 sandboxes at once (`MAX_
 
 ```bash
 sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade hyperbeam ~/hyperbeam-src/deploy/helm/hyperbeam \
-  --namespace hyperbeam --reuse-values --set agents.maxSessions=2
+  --namespace hyperbeam --reset-then-reuse-values --set agents.maxSessions=2
 ```
 
 ## 5. Make it reachable
@@ -142,7 +142,7 @@ The Service address stays the same across updates, restarts and reboots. It chan
 
   ```bash
   sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade hyperbeam ~/hyperbeam-src/deploy/helm/hyperbeam \
-    --namespace hyperbeam --reuse-values \
+    --namespace hyperbeam --reset-then-reuse-values \
     --set ingress.enabled=true --set ingress.host=hyperbeam.lan
   ```
 

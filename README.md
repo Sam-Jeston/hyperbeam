@@ -111,7 +111,7 @@ the container image to `hyperbeam/harness-claude-code:dev` and add a credential.
 on your machine: it is in the harness image.
 
 To update, rebuild with a new tag, `kind load` it, and run
-`helm upgrade hyperbeam deploy/helm/hyperbeam -n hyperbeam --reuse-values --set image.tag=… --set agents.runnerImage.tag=…`.
+`helm upgrade hyperbeam deploy/helm/hyperbeam -n hyperbeam --reset-then-reuse-values --set image.tag=… --set agents.runnerImage.tag=…`.
 Data survives restarts of the control plane, Docker and your machine, but `kind delete cluster` deletes
 it. The docs page *Run in a local cluster* covers backups, an external Postgres, and k3d and minikube.
 

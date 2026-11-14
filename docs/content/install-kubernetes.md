@@ -105,6 +105,8 @@ To show nodes and their images, the chart lets the control plane list the cluste
 
 A node reports only its 50 largest images. On a node that holds more, an image it does not list is shown as unknown, not as missing.
 
+With the default pull policy, `IfNotPresent`, a node that already holds an image keeps using it, even after its tag (such as `latest`) has moved on in the registry. To update it, select **Pull** next to the image, or **Pull all**. Hyperbeam starts a short-lived pod on each ready node that runs the image with `imagePullPolicy: Always`, which makes the node fetch it again, then does nothing. The page shows how each pull went, and removes the pod a few minutes after it is done. Sandboxes started after the pull use the new image; running ones keep the image they started with. An image that exists only on the node, such as one loaded with `k3s ctr images import`, can’t be pulled, and the pull says so; the node keeps its copy.
+
 ## Network isolation
 
 The NetworkPolicy is what keeps sandboxes from reaching anything but Hyperbeam.

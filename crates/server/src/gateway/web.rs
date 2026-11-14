@@ -10,8 +10,8 @@
 //! could fetch any URL could put secrets in one. So by default an agent may
 //! only fetch URLs it did not write itself: ones a person gave it, ones a web
 //! search returned, and ones a page it fetched links to. Admins can list
-//! sites agents may read freely, restrict agents to that list, or turn web
-//! access off.
+//! sites agents may read freely, restrict agents to that list, let agents
+//! read any public page, or turn web access off.
 
 use super::{ToolDef, ToolError, ToolOutput, ToolResult, arg_str, schema};
 use crate::app::App;
@@ -43,6 +43,8 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
+    /// Any public URL, including ones the agent wrote itself.
+    Any,
     /// URLs the agent was given or found, plus the listed sites.
     #[default]
     Known,
@@ -76,8 +78,7 @@ pub fn tools() -> Vec<ToolDef> {
     vec![ToolDef {
         name: "web_fetch",
         description: "Read a public web page (documentation, an article, a raw file) as markdown. \
-                      You can fetch URLs a person gave you, URLs a web search returned, links on pages you have fetched, \
-                      and any page on a site the team has listed. URLs you compose yourself are refused. \
+                      Which URLs you may fetch is set by the team; a refused fetch says why. \
                       Long pages come in parts: pass `offset` to read on.",
         schema: schema(&[
             ("url", "string", "The http(s) URL to read", true),
@@ -104,6 +105,8 @@ enum Basis {
     Known,
     /// It is on a listed site, and the agent may have written the rest.
     Listed,
+    /// The team lets agents read any public page.
+    Any,
 }
 
 fn parse(raw: &str) -> Result<Url, ToolError> {
@@ -252,6 +255,7 @@ async fn permitted(app: &App, session: &Session, policy: &Policy, url: &Url) -> 
     let host = url.host_str().unwrap_or_default();
     match policy.mode {
         Mode::Off => Err(ToolError::Denied("web access is turned off for this team".into())),
+        Mode::Any => Ok(Basis::Any),
         _ if policy.lists(url) => Ok(Basis::Listed),
         Mode::Listed => Err(ToolError::Denied(format!(
             "`{host}` is not one of the sites this team lets agents read. An admin can add it under Settings → General."
@@ -587,5 +591,7 @@ mod tests {
         assert!(policy.lists(&Url::parse("https://docs.rs/tokio").unwrap()));
         assert!(policy.lists(&Url::parse("https://a.example.com/").unwrap()));
         assert!(!policy.lists(&Url::parse("https://example.com/").unwrap()));
+        let policy: Policy = serde_json::from_value(json!({ "mode": "any" })).unwrap();
+        assert_eq!(policy.mode, Mode::Any);
     }
 }

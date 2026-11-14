@@ -103,6 +103,7 @@ pub fn router() -> Router<App> {
         .route("/activity", get(work::list_activity))
         .route("/audit", get(work::list_audit))
         .route("/cluster", get(cluster::get))
+        .route("/cluster/images/pull", post(cluster::pull))
 }
 
 /// Public: what the login screen needs before anyone is signed in.

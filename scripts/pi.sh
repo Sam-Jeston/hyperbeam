@@ -159,7 +159,7 @@ ensure_release() {
     log "Upgrading the Helm release (applies chart changes)"
     pi "$SRC" "${images[@]}" <<EOF
 chart=\$1; shift
-$HELM upgrade hyperbeam "\$chart/deploy/helm/hyperbeam" -n $NS --reuse-values "\$@" >/dev/null
+$HELM upgrade hyperbeam "\$chart/deploy/helm/hyperbeam" -n $NS --reset-then-reuse-values "\$@" >/dev/null
 EOF
   else
     [[ -n $PUBLIC_URL ]] || die "set PUBLIC_URL for the first install, e.g. PUBLIC_URL=https://hyperbeam.example.com"

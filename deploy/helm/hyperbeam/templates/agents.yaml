@@ -71,6 +71,20 @@ subjects:
     namespace: {{ .Release.Namespace }}
 {{- end }}
 ---
+# Image pull pods (from the Cluster page) only make their node fetch an
+# image, which the kubelet does, not the pod. They need no network at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-image-pulls
+  namespace: {{ .Values.agents.namespace }}
+  labels: {{- include "hyperbeam.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      hyperbeam.dev/role: image-pull
+  policyTypes: ["Ingress", "Egress"]
+---
 # Sandboxes accept no connections. They may reach the control plane (API,
 # git proxy, tool gateway, egress proxy) and cluster DNS; with
 # egress.enforce they may reach nothing else.

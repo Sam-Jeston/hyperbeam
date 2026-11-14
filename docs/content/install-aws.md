@@ -160,7 +160,7 @@ Then open **Settings → Harnesses** and set each harness profile’s image to t
 Build and push the images with a new tag, as in step 3. Then, with the port forward running:
 
 ```bash
-helm upgrade hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --reuse-values \
+helm upgrade hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --reset-then-reuse-values \
   --set image.tag=NEW_TAG --set agents.runnerImage.tag=NEW_TAG
 ```
 

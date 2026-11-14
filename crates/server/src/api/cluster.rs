@@ -3,11 +3,12 @@
 
 use crate::app::App;
 use crate::auth::AuthUser;
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::sandbox::{NodeInfo, SandboxInfo, normalize_image};
 use axum::Json;
 use axum::extract::State;
 use chrono::Utc;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -51,32 +52,41 @@ fn pull_error(sandboxes: &[SandboxInfo], full: &str) -> Option<String> {
         .map(|container| if container.message.is_empty() { container.reason.clone() } else { container.message.clone() })
 }
 
+/// Every image sandboxes start from. Images only mean something where
+/// sandboxes are containers.
+async fn wanted_images(app: &App) -> ApiResult<Vec<Wanted>> {
+    let mut wanted = Vec::new();
+    if app.driver.name() != "kubernetes" {
+        return Ok(wanted);
+    }
+    want(&mut wanted, &app.cfg.runner_image, "runner", "Runner");
+    let harnesses: Vec<(String, String)> = sqlx::query_as("SELECT title, image FROM harnesses ORDER BY title").fetch_all(&app.db).await?;
+    for (title, image) in &harnesses {
+        want(&mut wanted, image, "harness", title);
+    }
+    let environments: Vec<(String, String)> = sqlx::query_as("SELECT name, image FROM environments ORDER BY name").fetch_all(&app.db).await?;
+    for (name, image) in &environments {
+        want(&mut wanted, image, "environment", name);
+    }
+    Ok(wanted)
+}
+
 pub async fn get(State(app): State<App>, actor: AuthUser) -> ApiResult<Json<Value>> {
     actor.require_admin()?;
     let inspection = app.driver.inspect().await;
     let kubernetes = app.driver.name() == "kubernetes";
 
-    // Images only mean something where sandboxes are containers.
-    let mut wanted = Vec::new();
-    if kubernetes {
-        want(&mut wanted, &app.cfg.runner_image, "runner", "Runner");
-        let harnesses: Vec<(String, String)> = sqlx::query_as("SELECT title, image FROM harnesses ORDER BY title").fetch_all(&app.db).await?;
-        for (title, image) in &harnesses {
-            want(&mut wanted, image, "harness", title);
-        }
-        let environments: Vec<(String, String)> = sqlx::query_as("SELECT name, image FROM environments ORDER BY name").fetch_all(&app.db).await?;
-        for (name, image) in &environments {
-            want(&mut wanted, image, "environment", name);
-        }
-    }
+    let wanted = wanted_images(&app).await?;
     let images: Vec<Value> = wanted
         .iter()
         .map(|w| {
+            let pulls: Vec<&_> = inspection.pulls.iter().filter(|p| normalize_image(&p.image) == w.full).collect();
             json!({
                 "image": w.image,
                 "used_by": w.used_by,
                 "nodes": inspection.nodes.iter().map(|node| on_node(node, &w.full)).collect::<Vec<_>>(),
                 "pull_error": pull_error(&inspection.sandboxes, &w.full),
+                "pulls": pulls,
             })
         })
         .collect();
@@ -127,6 +137,25 @@ pub async fn get(State(app): State<App>, actor: AuthUser) -> ApiResult<Json<Valu
         "events": inspection.events,
         "events_error": inspection.events_error,
     })))
+}
+
+#[derive(Deserialize)]
+pub struct Pull {
+    image: String,
+}
+
+/// Fetch an image afresh onto every node, so a tag such as `latest` that has
+/// moved on in the registry is what the next sandbox starts from.
+pub async fn pull(State(app): State<App>, actor: AuthUser, Json(body): Json<Pull>) -> ApiResult<Json<Value>> {
+    actor.require_admin()?;
+    let full = normalize_image(&body.image);
+    let wanted = wanted_images(&app).await?;
+    let Some(image) = wanted.iter().find(|w| w.full == full) else {
+        return Err(ApiError::bad("only an image a sandbox starts from can be pulled"));
+    };
+    let nodes = app.driver.pull(&image.image).await.map_err(|err| ApiError::bad(format!("{err:#}")))?;
+    tracing::info!(user = %actor.0.id, image = %image.image, nodes, "image pull started");
+    Ok(Json(json!({ "nodes": nodes })))
 }
 
 #[cfg(test)]

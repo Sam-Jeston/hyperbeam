@@ -732,6 +732,7 @@ function General() {
             value={form.web_mode}
             onValueChange={(v) => setForm({ ...form, web_mode: v })}
             options={[
+              { value: "any", label: "Any public page" },
               { value: "known", label: "Pages they were given or found, and the sites listed below" },
               { value: "listed", label: "Only the sites listed below" },
               { value: "off", label: "None" },
@@ -739,7 +740,10 @@ function General() {
           />
         )}
       </Field>
-      {form.web_mode !== "off" && (
+      {form.web_mode === "any" && (
+        <Notice tone="warning" title="Agents can send data out in a URL">Agents can fetch any public URL, including ones they write themselves, so a page that tricks an agent could get it to put what its sandbox holds into a request. Every fetch is still recorded.</Notice>
+      )}
+      {form.web_mode !== "off" && form.web_mode !== "any" && (
         <Field
           label="Sites agents may read freely"
           optional={form.web_mode === "known"}

@@ -392,6 +392,17 @@ export interface ClusterImage {
   nodes: { node: string; state: "present" | "missing" | "unknown"; size_bytes: number | null }[];
   /** Why a sandbox is failing to pull it right now. */
   pull_error: string | null;
+  /** Pulls asked for from the Cluster page, the latest per node, kept for a few minutes. */
+  pulls: ClusterPull[];
+}
+
+export interface ClusterPull {
+  image: string;
+  node: string;
+  state: "pulling" | "pulled" | "failed";
+  message: string;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export interface ClusterSandbox {
