@@ -6,6 +6,7 @@ node_modules
 .hyperbeam-dev
 /site/dist
 /docs/dist
+/site/public-build
 hyperbeam-master-key
 
 # Terraform

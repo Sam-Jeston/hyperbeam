@@ -54,6 +54,8 @@ cd site && bun install && bun run dev    # http://localhost:4321, with the docs 
 
 They link to each other by path: the docs expect to be served at `/docs` beside the landing page. Override this at build time with `HYPERBEAM_DOCS_BASE`, `HYPERBEAM_SITE_URL` and `HYPERBEAM_DOCS_URL`. Set `HYPERBEAM_REPO_URL` to show links to the source and “Edit this page”.
 
+`scripts/site.sh build` builds both into one directory, `site/public-build/`, with the source links pointing at the public repository. `PI=user@host scripts/site.sh deploy` also copies it to a machine and serves it there with `deploy/site/serve.ts`, a small Bun server on `127.0.0.1:4330` run by the `hyperbeam-site` systemd unit, which redirects every other host name (such as `www.`) to `SITE_HOST`. Something in front of it terminates TLS: hyperbeam.fun is a Cloudflare tunnel whose ingress maps the domain to that port.
+
 ## Brand
 
 `brand/README.md` describes the brand and how to apply it. All colors, fonts and radii come from `brand/tokens.css`; don’t define colors anywhere else.
