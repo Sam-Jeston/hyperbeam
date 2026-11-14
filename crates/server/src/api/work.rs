@@ -193,6 +193,9 @@ pub struct NewSessionBody {
     harness: Option<String>,
     /// Model to run on. Omit for the harness profile's default.
     model: Option<String>,
+    /// Environment to run in, by name. Omit for the repositories' default;
+    /// `none` runs in the harness image.
+    environment: Option<String>,
     #[serde(default)]
     repos: Vec<String>,
     #[serde(default)]
@@ -235,6 +238,7 @@ pub async fn create_session(State(app): State<App>, AuthUser(user): AuthUser, Js
                 grants,
                 workflow: None,
                 model: body.model,
+                environment: body.environment,
                 context: None,
             },
         )
@@ -249,6 +253,8 @@ pub struct RunWorkflow {
     title: Option<String>,
     /// Overrides the workflow's model.
     model: Option<String>,
+    /// Overrides the workflow's environment.
+    environment: Option<String>,
     workstream_id: Option<Uuid>,
     new_workstream: Option<String>,
 }
@@ -281,6 +287,7 @@ pub async fn run_workflow(State(app): State<App>, AuthUser(user): AuthUser, Path
                 grants: Some(spec.grants.clone()),
                 workflow: Some(spec.name.clone()),
                 model: body.model.or_else(|| spec.model.clone()),
+                environment: body.environment.or_else(|| spec.environment.clone()),
                 context: None,
             },
         )
@@ -307,8 +314,13 @@ pub async fn get_session(State(app): State<App>, AuthUser(user): AuthUser, Path(
         Some(ws) => sqlx::query_as("SELECT id, title FROM workstreams WHERE id = $1").bind(ws).fetch_optional(&app.db).await?,
         None => None,
     };
+    let environment = match session.environment_id {
+        Some(id) => store::environment_by_id(&app.db, id).await?,
+        None => None,
+    };
     Ok(Json(json!({
         "session": session,
+        "environment": environment.map(|e| json!({ "name": e.name, "image": e.image })),
         "harness": harness.map(|h| {
             // What the session runs on, by its display name where known.
             let id = session.model.clone().or_else(|| h.default_model.clone());

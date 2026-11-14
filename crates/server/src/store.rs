@@ -49,6 +49,21 @@ pub struct Repo {
     pub full_name: String,
     pub default_branch: String,
     pub description: String,
+    /// The environment agents working on it run in unless told otherwise.
+    pub environment_id: Option<Uuid>,
+    /// Run with `sh -c` in each fresh checkout, before the agent starts.
+    pub setup_command: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A container image holding a team's toolchains. The coding agent is carried
+/// into it from the harness image when a sandbox starts.
+#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+pub struct Environment {
+    pub id: Uuid,
+    pub name: String,
+    pub description: String,
+    pub image: String,
     pub created_at: DateTime<Utc>,
 }
 
@@ -160,6 +175,8 @@ pub struct Session {
     pub role: String,
     pub status: String,
     pub harness_id: Uuid,
+    /// The environment its sandboxes run in; `None` is the harness image.
+    pub environment_id: Option<Uuid>,
     pub created_by: Uuid,
     pub workflow: Option<String>,
     pub repos: Json<Vec<String>>,
@@ -182,7 +199,7 @@ pub struct Session {
     pub last_activity_at: DateTime<Utc>,
 }
 
-pub const SESSION_COLUMNS: &str = "id, workstream_id, parent_id, title, role, status, harness_id, created_by, \
+pub const SESSION_COLUMNS: &str = "id, workstream_id, parent_id, title, role, status, harness_id, environment_id, created_by, \
      workflow, repos, skills, grants, work_branch, model, links, headline, summary, error, question, event_seq, launches, \
      created_at, started_at, ended_at, last_activity_at";
 
@@ -219,6 +236,14 @@ pub async fn harness_by_id(db: &PgPool, id: Uuid) -> sqlx::Result<Option<Harness
 
 pub async fn harness_by_name(db: &PgPool, name: &str) -> sqlx::Result<Option<Harness>> {
     sqlx::query_as("SELECT * FROM harnesses WHERE name = $1").bind(name).fetch_optional(db).await
+}
+
+pub async fn environment_by_id(db: &PgPool, id: Uuid) -> sqlx::Result<Option<Environment>> {
+    sqlx::query_as("SELECT * FROM environments WHERE id = $1").bind(id).fetch_optional(db).await
+}
+
+pub async fn environment_by_name(db: &PgPool, name: &str) -> sqlx::Result<Option<Environment>> {
+    sqlx::query_as("SELECT * FROM environments WHERE name = $1").bind(name).fetch_optional(db).await
 }
 
 pub async fn repo_by_name(db: &PgPool, full_name: &str) -> sqlx::Result<Option<Repo>> {

@@ -13,8 +13,12 @@ pub struct LaunchRequest {
     pub session_id: Uuid,
     /// The session's run token: its only credential.
     pub token: String,
-    /// Container image of the harness profile (ignored by the process driver).
+    /// Container image the sandbox runs: the harness profile's, or an
+    /// environment's (ignored by the process driver).
     pub image: String,
+    /// Set when `image` is an environment: the harness image whose agent
+    /// (`/opt/harness`) is carried into it.
+    pub harness_image: Option<String>,
     /// URL the runner uses to reach the control plane.
     pub server_url: String,
     /// Additional non-secret environment for the sandbox.

@@ -46,6 +46,9 @@ pub struct WorkflowSpec {
     /// Model for this workflow's agents. Falls back to the harness default.
     #[serde(default)]
     pub model: Option<String>,
+    /// Environment its agents run in. Falls back to the repositories' default.
+    #[serde(default)]
+    pub environment: Option<String>,
     /// `owner/name` repositories checked out into the workspace.
     #[serde(default)]
     pub repos: Vec<String>,

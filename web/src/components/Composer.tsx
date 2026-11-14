@@ -4,7 +4,7 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { Bot, ChevronRight, Network } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { api, type GrantInfo, type Harness, modelLabel, type Repo, type Skill, type Workflow } from "../lib/api";
+import { api, type Environment, type GrantInfo, type Harness, modelLabel, type Repo, type Skill, type Workflow } from "../lib/api";
 import { useStore } from "../lib/store";
 import { A, ErrorNote, isSubmitKey, modKey, navigate, useAction } from "../lib/ui";
 import { Button } from "./ui/button";
@@ -29,6 +29,7 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [environments, setEnvironments] = useState<Environment[]>([]);
   const [defaultHarness, setDefaultHarness] = useState("claude-code");
   const [loaded, setLoaded] = useState(false);
 
@@ -39,6 +40,8 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
   const [harness, setHarness] = useState("");
   // "" means the harness profile's default.
   const [model, setModel] = useState("");
+  // "" leaves it to the repositories.
+  const [environment, setEnvironment] = useState("");
   const [pickedRepos, setPickedRepos] = useState<string[]>(workstreamRepos ?? []);
   const [pickedSkills, setPickedSkills] = useState<string[]>([]);
   const [grants, setGrants] = useState<string[]>(me.grants);
@@ -48,8 +51,9 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
   const action = useAction();
 
   useEffect(() => {
-    void Promise.all([api.get("/harnesses"), api.get("/repos"), api.get("/skills"), api.get("/workflows"), api.get("/settings")]).then(
-      ([h, r, s, w, settings]) => {
+    void Promise.all([api.get("/harnesses"), api.get("/repos"), api.get("/skills"), api.get("/workflows"), api.get("/settings"), api.get("/environments")]).then(
+      ([h, r, s, w, settings, e]) => {
+        setEnvironments(e.environments);
         setHarnesses(h.harnesses);
         setRepos(r.repos.filter((repo: Repo) => repo.accessible));
         setSkills(s.skills);
@@ -67,6 +71,13 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
   // In workflow mode the workflow names the harness.
   const harnessName = mode === "workflow" ? workflow?.spec?.harness ?? defaultHarness : harness;
   const chosenHarness = harnesses.find((h) => h.name === harnessName);
+  // Where the session lands when nobody chooses: the first repository that names an environment.
+  const sessionRepos = mode === "workflow" ? workflow?.spec?.repos ?? [] : pickedRepos;
+  const repoEnvironment = sessionRepos
+    .map((name) => repos.find((r) => r.full_name.toLowerCase() === name.toLowerCase())?.environment_id)
+    .map((id) => environments.find((e) => e.id === id))
+    .find(Boolean);
+  const defaultEnvironment = (mode === "workflow" && environments.find((e) => e.name === workflow?.spec?.environment)) || repoEnvironment;
   const heldGrants: GrantInfo[] = useMemo(() => allGrants.filter((g) => me.grants.includes(g.id)), [allGrants, me]);
   // Checking a repository out is reading from its host.
   const missingRead = [...new Set(repos.filter((r) => pickedRepos.includes(r.full_name)).map((r) => r.host))].filter((host) => !grants.includes(`${host}:read`));
@@ -85,7 +96,7 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
       const place = workstreamId ? { workstream_id: workstreamId } : track ? { new_workstream: title.trim() || firstLine(mode === "workflow" ? workflow?.spec?.name ?? "" : prompt) } : {};
       let result;
       if (mode === "workflow" && workflow) {
-        result = await api.post(`/workflows/${workflow.id}/run`, { inputs, title: title.trim() || undefined, model: model || undefined, ...place });
+        result = await api.post(`/workflows/${workflow.id}/run`, { inputs, title: title.trim() || undefined, model: model || undefined, environment: environment || undefined, ...place });
       } else {
         result = await api.post("/sessions", {
           prompt,
@@ -93,6 +104,7 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
           role,
           harness,
           model: model || undefined,
+          environment: environment || undefined,
           repos: pickedRepos,
           skills: pickedSkills,
           grants,
@@ -194,6 +206,7 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
               </Field>
               <ModelPicker harness={chosenHarness} model={model} onChange={setModel} />
             </div>
+            <EnvironmentPicker environments={environments} fallback={defaultEnvironment} value={environment} onChange={setEnvironment} />
 
             <Collapsible.Root className="group rounded-lg border border-border">
               <Collapsible.Trigger className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[13px] hover:bg-surface-2/50">
@@ -264,6 +277,7 @@ export function Composer({ onClose, workstreamId, workstreamRepos }: Props) {
                   onChange={setModel}
                   fallback={workflow.spec.model ? `Workflow’s choice (${modelLabel(chosenHarness?.model_choices ?? [], workflow.spec.model)})` : undefined}
                 />
+                <EnvironmentPicker environments={environments} fallback={defaultEnvironment} value={environment} onChange={setEnvironment} />
               </>
             )}
           </>
@@ -311,6 +325,29 @@ function ModelPicker(props: { harness: Harness | undefined; model: string; onCha
           value={props.model}
           onValueChange={props.onChange}
           options={[{ value: "", label: fallback }, ...choices.map((m) => ({ value: m.id, label: m.label || m.id }))]}
+        />
+      )}
+    </Field>
+  );
+}
+
+/** Choose the image the sandbox runs, or leave it to the repositories. Hidden until a team has environments. */
+function EnvironmentPicker(props: { environments: Environment[]; fallback: Environment | undefined; value: string; onChange: (name: string) => void }) {
+  if (props.environments.length === 0) return null;
+  const chosen = props.environments.find((e) => e.name === props.value) ?? (props.value ? undefined : props.fallback);
+  return (
+    <Field label="Environment" hint={chosen ? chosen.description || chosen.image : "The agent’s own image, with no project toolchains added."}>
+      {(id) => (
+        <Select
+          id={id}
+          value={props.value}
+          onValueChange={props.onChange}
+          options={[
+            { value: "", label: props.fallback ? `Default (${props.fallback.name})` : "Default (harness image)" },
+            ...props.environments.map((e) => ({ value: e.name, label: e.name })),
+            // Only worth offering when the default is something else.
+            ...(props.fallback ? [{ value: "none", label: "None (harness image)" }] : []),
+          ]}
         />
       )}
     </Field>

@@ -76,6 +76,7 @@ export interface Session {
   role: "worker" | "conductor";
   status: SessionStatus;
   harness_id: string;
+  environment_id: string | null;
   created_by: string;
   workflow: string | null;
   repos: string[];
@@ -310,7 +311,19 @@ export interface Repo {
   full_name: string;
   default_branch: string;
   description: string;
+  /** The environment agents on it run in unless told otherwise. */
+  environment_id: string | null;
+  /** Run in each fresh checkout before the agent starts. */
+  setup_command: string;
   accessible: boolean;
+}
+
+/** A container image holding a team's toolchains. */
+export interface Environment {
+  id: string;
+  name: string;
+  description: string;
+  image: string;
 }
 
 export interface Skill {
@@ -340,6 +353,7 @@ export interface Workflow {
     role: "worker" | "conductor";
     harness: string | null;
     model: string | null;
+    environment: string | null;
     repos: string[];
     skills: string[];
     grants: string[];

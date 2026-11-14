@@ -19,7 +19,7 @@ Select **Add a harness** and fill in:
 |---|---|
 | Name | Lowercase letters, digits and dashes. Used in workflows and `--harness`. |
 | Title, description | How it appears in **New work**. |
-| Container image | Needs `git` and the agent itself. Hyperbeam adds its runner at start-up. |
+| Container image | Needs `git` and the agent itself. Hyperbeam adds its runner at start-up. To work with [environments](/environments), it must keep the agent under `/opt/harness`. |
 | Command | JSON array that starts the agent speaking ACP on stdio, such as `["my-agent", "--acp"]`. |
 | Default model | Used when someone starts work without choosing a model. |
 | Model environment variable | Optional. Also set to the chosen model, for agents that read it from the environment. |
@@ -27,7 +27,9 @@ Select **Add a harness** and fill in:
 | Credentials it accepts | One per line as `ENV_NAME=Label`. Add `[oauth]` at the end for a personal subscription token. |
 | Hosts it may reach | One per line. Added to the egress allowlist for this harness’s sandboxes. |
 
-`deploy/docker/Dockerfile.harness` is a starting point for an image. Add your language toolchains to it so agents can build and test your code.
+`deploy/docker/Dockerfile.harness` is a starting point for an image. It installs the agent with `harness-install`, which puts it under `/opt/harness` with a Node.js of its own. An agent that is not an npm package can be placed there by hand: its launcher in `/opt/harness/bin`, named as the first word of the command, and everything it needs beside it.
+
+To give agents your language toolchains, use an [environment](/environments) rather than adding them to the harness image. One environment then serves every harness.
 
 ## Models
 

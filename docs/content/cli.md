@@ -27,6 +27,7 @@ hyperbeam run "Fix the flaky checkout test" --repo acme/web --model sonnet --fol
 | `--skill <name>` | Skill to install. Repeatable. |
 | `--harness <name>` | Harness profile. Defaults to the team’s. |
 | `-m`, `--model <model>` | Model to run on. Defaults to the harness profile’s. |
+| `-e`, `--environment <name>` | [Environment](/environments) to run in. Defaults to the repository’s. `none` runs in the harness image. |
 | `--conductor` | Start a conductor that delegates to worker agents. |
 | `--workstream <title>` | Put it on the board as a new workstream with this title. |
 | `--grant <grant>` | Limit the agent to these permissions, such as `github:read`. Repeatable. Defaults to everything you hold. |
@@ -42,6 +43,7 @@ hyperbeam workflow ship-feature -i feature="CSV export" --follow
 |---|---|
 | `-i`, `--input <name=value>` | An input. Repeatable. |
 | `-m`, `--model <model>` | Model to run on, overriding the workflow’s. |
+| `-e`, `--environment <name>` | [Environment](/environments) to run in, overriding the workflow’s. |
 | `--workstream <title>` | Put it on the board as a new workstream with this title. |
 | `-f`, `--follow` | Stream the agent’s work until its turn ends. |
 

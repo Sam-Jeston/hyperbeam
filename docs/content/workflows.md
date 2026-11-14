@@ -34,6 +34,7 @@ prompt: |
 | `role` | no | `worker` (the default) or `conductor`. |
 | `harness` | no | Harness profile name. Defaults to the team’s. |
 | `model` | no | Model for its agents. Defaults to the harness profile’s. Whoever runs it can override this. |
+| `environment` | no | [Environment](/environments) its agents run in. Defaults to the repositories’. Whoever runs it can override this. |
 | `repos` | no | `owner/name` repositories to check out. |
 | `skills` | no | Skills to install. |
 | `grants` | no | The most its agents may do. Still limited to what the person running it holds. |

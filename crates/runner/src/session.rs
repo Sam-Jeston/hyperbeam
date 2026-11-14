@@ -107,12 +107,23 @@ async fn drive(cfg: &Config, spec: &RunSpec, link: &mut Link) -> Result<()> {
     tokio::fs::create_dir_all(&cfg.workspace).await.context("could not create the workspace directory")?;
     let workspace = cfg.workspace.canonicalize()?;
 
+    if let Some(note) = workspace::home_skipped() {
+        report.system(note);
+    }
     let git_env = workspace::git_env(spec, &cfg.token);
     for repo in &spec.repos {
         let note = workspace::checkout_repo(&workspace, repo, &spec.work_branch, &git_env)
             .await
             .with_context(|| format!("could not check out {}", repo.full_name))?;
         report.system(note);
+    }
+    // Setup follows every checkout, so one repository's setup can count on its neighbours.
+    let mut setup_env = workspace::proxy_env(&spec.harness.env);
+    setup_env.extend(git_env.clone());
+    for repo in spec.repos.iter().filter(|repo| !repo.setup_command.trim().is_empty()) {
+        report.system(format!("Running setup for {}: {}", repo.full_name, repo.setup_command.trim()));
+        report.flush();
+        report.system(workspace::run_setup(&workspace, repo, &setup_env).await);
     }
     if !spec.skills.is_empty() {
         workspace::write_skills(&workspace, &spec.skills).await?;
@@ -127,9 +138,26 @@ async fn drive(cfg: &Config, spec: &RunSpec, link: &mut Link) -> Result<()> {
 
     // `{runner}` lets a profile launch this binary's built-in agents.
     let exe = std::env::current_exe().context("cannot locate the runner binary")?;
-    let command: Vec<String> =
+    let mut command: Vec<String> =
         spec.harness.command.iter().map(|arg| arg.replace("{runner}", &exe.to_string_lossy())).collect();
-    let acp::Spawned { client, mut incoming, mut child } = acp::spawn(&command, &env, &workspace)?;
+    // In an environment image the agent was carried in beside the team's tools.
+    if let Some(program) = command.first_mut() {
+        let path = env.get("PATH").cloned().or_else(|| std::env::var("PATH").ok());
+        let (found, path) = workspace::harness_command(program, path.as_deref());
+        *program = found;
+        if let Some(path) = path {
+            env.insert("PATH".into(), path);
+        }
+    }
+    let spawned = acp::spawn(&command, &env, &workspace);
+    if spawned.is_err() && workspace::harness_missing() {
+        bail!(
+            "the harness image has no agent under {} to carry into this environment. \
+             Rebuild it from deploy/docker/Dockerfile.harness, or keep the agent there in an image of your own.",
+            hyperbeam_core::protocol::HARNESS_DIR
+        );
+    }
+    let acp::Spawned { client, mut incoming, mut child } = spawned?;
     let mut stderr_tail: VecDeque<String> = VecDeque::new();
 
     // Handshake. Harness stderr is collected meanwhile so a failure to start

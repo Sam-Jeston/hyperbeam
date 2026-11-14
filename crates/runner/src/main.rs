@@ -1,6 +1,8 @@
 mod acp;
 mod bridge;
 mod conn;
+#[cfg(unix)]
+mod seed;
 mod session;
 mod workspace;
 
@@ -32,6 +34,16 @@ enum Command {
     Run,
     /// Copy this binary to DEST (used by the Kubernetes init container).
     Install { dest: PathBuf },
+    /// Copy what an image keeps in FROM into the volume at TO (used by the
+    /// Kubernetes init containers).
+    #[cfg(unix)]
+    Seed {
+        from: PathBuf,
+        to: PathBuf,
+        /// Leave it all out, and a note behind, if FROM holds more than this.
+        #[arg(long)]
+        max_bytes: Option<u64>,
+    },
     /// Bridge a stdio MCP client to the Hyperbeam tool gateway.
     McpBridge {
         #[arg(long, env = "HYPERBEAM_MCP_URL")]
@@ -60,6 +72,17 @@ async fn main() -> anyhow::Result<()> {
             {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755))?;
+            }
+            Ok(())
+        }
+        #[cfg(unix)]
+        Command::Seed { from, to, max_bytes } => {
+            match seed::seed(&from, &to, max_bytes)? {
+                seed::Outcome::Nothing => {}
+                seed::Outcome::Copied { files, skipped } => {
+                    tracing::info!("copied {files} files from {} ({skipped} could not be read)", from.display())
+                }
+                seed::Outcome::TooLarge { bytes } => tracing::warn!("{} holds {bytes} bytes, too much to carry over", from.display()),
             }
             Ok(())
         }

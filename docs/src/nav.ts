@@ -9,7 +9,7 @@ export interface NavGroup {
 export const NAV: NavGroup[] = [
   { title: "Get started", pages: ["introduction", "quickstart", "concepts"] },
   { title: "Using Hyperbeam", pages: ["starting-work", "sessions", "board", "conductor", "notifications", "chat", "library", "workflows", "cli"] },
-  { title: "Running a team", pages: ["team-setup", "permissions", "harnesses", "credentials", "integrations"] },
+  { title: "Running a team", pages: ["team-setup", "permissions", "harnesses", "environments", "credentials", "integrations"] },
   { title: "Deploy", pages: ["local-cluster", "install-kubernetes", "install-aws", "install-raspberry-pi", "configuration", "security"] },
   { title: "Project", pages: ["status", "development"] },
 ];

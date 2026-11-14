@@ -24,6 +24,7 @@ Done when the checkout suite passes ten runs in a row.
 - **Repositories**: the ones the agent checks out. You see only the repositories you have access to.
 - **Harness**: the coding agent to run. The team default is preselected. A harness that has no credential yet can’t be started; [add one](/credentials) first.
 - **Model**: leave it on the default, or choose one the harness offers. See [Models](/harnesses#models).
+- **Environment**: the image the sandbox runs, with your project’s tools. It defaults to the repository’s, and appears once the team has one. See [Environments](/environments).
 
 ## Narrow what it may do
 

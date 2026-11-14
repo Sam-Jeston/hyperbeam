@@ -1,13 +1,16 @@
 //! Kubernetes driver: one pod per live session.
 //!
-//! The harness image is whatever the profile names. The runner binary is
-//! copied in by an init container, so harness images need nothing
-//! Hyperbeam-specific beyond `git` and the harness itself.
+//! The pod runs the harness profile's image, or an environment's image with
+//! the agent carried in from the harness image. Init containers do the
+//! carrying: the runner binary always, the agent (`/opt/harness`) when there
+//! is an environment, and whatever the image keeps in the home directory,
+//! which the pod's own writable home would otherwise hide.
 
 use super::{LaunchRequest, SandboxDriver};
 use crate::config::Config;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use hyperbeam_core::protocol::HARNESS_DIR;
 use k8s_openapi::api::core::v1::{Pod, Secret};
 use kube::api::{Api, DeleteParams, ListParams, PostParams};
 use kube::{Client, ResourceExt};
@@ -16,6 +19,11 @@ use uuid::Uuid;
 
 const SESSION_LABEL: &str = "hyperbeam.dev/session";
 const RUNNER_PATH: &str = "/hyperbeam/bin/hyperbeam-runner";
+const HOME: &str = "/home/agent";
+const HOME_SIZE: &str = "2Gi";
+/// The most an image's home directory may hold and still be carried into the
+/// sandbox's home, which is limited to `HOME_SIZE`.
+const HOME_SEED_BYTES: u64 = 1 << 30;
 
 /// How agent pods are shaped; separate from the client so it can be tested.
 #[derive(Clone)]
@@ -62,7 +70,7 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
         json!({ "name": "HYPERBEAM_SERVER_URL", "value": request.server_url }),
         json!({ "name": "HYPERBEAM_RUN_TOKEN", "valueFrom": { "secretKeyRef": { "name": name, "key": "token" } } }),
         json!({ "name": "HYPERBEAM_WORKSPACE", "value": "/workspace" }),
-        json!({ "name": "HOME", "value": "/home/agent" }),
+        json!({ "name": "HOME", "value": HOME }),
     ];
     for (key, value) in &request.env {
         env.push(json!({ "name": key, "value": value }));
@@ -71,6 +79,54 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
         "allowPrivilegeEscalation": false,
         "capabilities": { "drop": ["ALL"] },
     });
+    let runner_bin = json!({ "name": "hyperbeam-bin", "mountPath": "/hyperbeam/bin", "readOnly": true });
+    // Copies one directory of an image into a volume, with the runner binary.
+    let seed = |name: &str, image: &str, from: &str, volume: &str, extra: &[String]| {
+        let to = format!("/hyperbeam/{volume}");
+        let mut command = vec![RUNNER_PATH.to_string(), "seed".to_string(), from.to_string(), to.clone()];
+        command.extend_from_slice(extra);
+        json!({
+            "name": name,
+            "image": image,
+            "imagePullPolicy": settings.pull_policy,
+            "command": command,
+            "volumeMounts": [runner_bin, { "name": volume, "mountPath": to }],
+            "securityContext": hardened,
+            "resources": { "requests": { "cpu": "100m", "memory": "64Mi" }, "limits": { "cpu": "1", "memory": "256Mi" } },
+        })
+    };
+
+    let mut init = vec![json!({
+        "name": "runner",
+        "image": settings.runner_image,
+        "imagePullPolicy": settings.pull_policy,
+        "command": ["/hyperbeam-runner", "install", RUNNER_PATH],
+        "volumeMounts": [{ "name": "hyperbeam-bin", "mountPath": "/hyperbeam/bin" }],
+        "securityContext": hardened,
+        "resources": { "limits": { "cpu": "200m", "memory": "64Mi" } },
+    })];
+    let mut mounts = vec![
+        runner_bin.clone(),
+        json!({ "name": "workspace", "mountPath": "/workspace" }),
+        json!({ "name": "home", "mountPath": HOME }),
+        json!({ "name": "tmp", "mountPath": "/tmp" }),
+    ];
+    let mut volumes = vec![
+        json!({ "name": "hyperbeam-bin", "emptyDir": {} }),
+        json!({ "name": "workspace", "emptyDir": { "sizeLimit": settings.workspace_size } }),
+        json!({ "name": "home", "emptyDir": { "sizeLimit": HOME_SIZE } }),
+        json!({ "name": "tmp", "emptyDir": { "sizeLimit": "2Gi" } }),
+    ];
+    if let Some(harness_image) = &request.harness_image {
+        // The sandbox runs an environment's image: bring the agent to it.
+        init.push(seed("harness", harness_image, HARNESS_DIR, "harness", &[]));
+        mounts.push(json!({ "name": "harness", "mountPath": HARNESS_DIR, "readOnly": true }));
+        volumes.push(json!({ "name": "harness", "emptyDir": { "sizeLimit": "4Gi" } }));
+    }
+    // The home volume hides the image's own home directory, so what the image
+    // keeps there (a toolchain installed for the user, dotfiles) is copied in.
+    init.push(seed("home", &request.image, HOME, "home", &["--max-bytes".to_string(), HOME_SEED_BYTES.to_string()]));
+
     json!({
         "apiVersion": "v1",
         "kind": "Pod",
@@ -94,15 +150,7 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
                 "fsGroup": 1000,
                 "seccompProfile": { "type": "RuntimeDefault" },
             },
-            "initContainers": [{
-                "name": "runner",
-                "image": settings.runner_image,
-                "imagePullPolicy": settings.pull_policy,
-                "command": ["/hyperbeam-runner", "install", RUNNER_PATH],
-                "volumeMounts": [{ "name": "hyperbeam-bin", "mountPath": "/hyperbeam/bin" }],
-                "securityContext": hardened,
-                "resources": { "limits": { "cpu": "200m", "memory": "64Mi" } },
-            }],
+            "initContainers": init,
             "containers": [{
                 "name": "agent",
                 "image": request.image,
@@ -110,24 +158,14 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
                 "command": [RUNNER_PATH, "run"],
                 "workingDir": "/workspace",
                 "env": env,
-                "volumeMounts": [
-                    { "name": "hyperbeam-bin", "mountPath": "/hyperbeam/bin", "readOnly": true },
-                    { "name": "workspace", "mountPath": "/workspace" },
-                    { "name": "home", "mountPath": "/home/agent" },
-                    { "name": "tmp", "mountPath": "/tmp" },
-                ],
+                "volumeMounts": mounts,
                 "securityContext": hardened,
                 "resources": {
                     "requests": { "cpu": "250m", "memory": "512Mi" },
                     "limits": { "cpu": settings.cpu_limit, "memory": settings.memory_limit },
                 },
             }],
-            "volumes": [
-                { "name": "hyperbeam-bin", "emptyDir": {} },
-                { "name": "workspace", "emptyDir": { "sizeLimit": settings.workspace_size } },
-                { "name": "home", "emptyDir": { "sizeLimit": "2Gi" } },
-                { "name": "tmp", "emptyDir": { "sizeLimit": "2Gi" } },
-            ],
+            "volumes": volumes,
         },
     })
 }
@@ -207,23 +245,30 @@ impl SandboxDriver for KubernetesDriver {
 mod tests {
     use super::*;
 
-    #[test]
-    fn manifest_is_a_valid_restricted_pod() {
-        let settings = PodSettings {
+    fn settings() -> PodSettings {
+        PodSettings {
             runner_image: "runner:1".into(),
             pull_policy: "IfNotPresent".into(),
             cpu_limit: "2".into(),
             memory_limit: "4Gi".into(),
             workspace_size: "10Gi".into(),
-        };
-        let request = LaunchRequest {
+        }
+    }
+
+    fn request(image: &str, harness_image: Option<&str>) -> LaunchRequest {
+        LaunchRequest {
             session_id: Uuid::nil(),
             token: "nmr_secret".into(),
-            image: "harness:1".into(),
+            image: image.into(),
+            harness_image: harness_image.map(str::to_string),
             server_url: "http://hyperbeam:8080".into(),
             env: Default::default(),
-        };
-        let manifest = pod_manifest(&settings, &request);
+        }
+    }
+
+    #[test]
+    fn manifest_is_a_valid_restricted_pod() {
+        let manifest = pod_manifest(&settings(), &request("harness:1", None));
         // The token is referenced from a Secret, never written into the pod.
         assert!(!manifest.to_string().contains("nmr_secret"));
         let pod: Pod = serde_json::from_value(manifest).expect("manifest matches the Pod schema");
@@ -235,6 +280,37 @@ mod tests {
         let context = agent.security_context.as_ref().unwrap();
         assert_eq!(context.allow_privilege_escalation, Some(false));
         assert_eq!(context.capabilities.as_ref().unwrap().drop.as_ref().unwrap(), &["ALL".to_string()]);
-        assert_eq!(spec.init_containers.unwrap()[0].image.as_deref(), Some("runner:1"));
+        // The runner is installed, then the image's home is carried into the writable one.
+        let init = spec.init_containers.unwrap();
+        let names: Vec<&str> = init.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["runner", "home"]);
+        assert_eq!(init[0].image.as_deref(), Some("runner:1"));
+        assert_eq!(init[1].image.as_deref(), Some("harness:1"));
+        assert_eq!(
+            init[1].command.as_ref().unwrap(),
+            &[RUNNER_PATH, "seed", "/home/agent", "/hyperbeam/home", "--max-bytes", "1073741824"].map(String::from)
+        );
+        for container in &init {
+            assert_eq!(container.security_context.as_ref().unwrap().allow_privilege_escalation, Some(false));
+        }
+    }
+
+    #[test]
+    fn an_environment_runs_its_image_with_the_agent_carried_in() {
+        let manifest = pod_manifest(&settings(), &request("rust:1", Some("harness:1")));
+        let pod: Pod = serde_json::from_value(manifest).expect("manifest matches the Pod schema");
+        let spec = pod.spec.unwrap();
+        let init = spec.init_containers.unwrap();
+        let names: Vec<&str> = init.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["runner", "harness", "home"]);
+        // The agent comes out of the harness image; everything else is the environment.
+        assert_eq!(init[1].image.as_deref(), Some("harness:1"));
+        assert_eq!(init[1].command.as_ref().unwrap(), &[RUNNER_PATH, "seed", "/opt/harness", "/hyperbeam/harness"].map(String::from));
+        assert_eq!(init[2].image.as_deref(), Some("rust:1"));
+        let agent = &spec.containers[0];
+        assert_eq!(agent.image.as_deref(), Some("rust:1"));
+        let mount = agent.volume_mounts.as_ref().unwrap().iter().find(|m| m.name == "harness").expect("the agent is mounted");
+        assert_eq!((mount.mount_path.as_str(), mount.read_only), ("/opt/harness", Some(true)));
+        assert!(spec.volumes.unwrap().iter().any(|v| v.name == "harness"));
     }
 }

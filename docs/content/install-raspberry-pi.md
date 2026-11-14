@@ -178,6 +178,8 @@ This copies the source, rebuilds the server and the runner, loads them and resta
 
 Set `PI` for each, or export it once.
 
+To give agents your project’s toolchains, add an [environment](/environments). k3s pulls a public image such as `rust:1.90` by itself the first time a sandbox uses it.
+
 Images always carry the tag `pi`. A rebuilt image replaces the one before it, so updates need no change to the chart’s settings. After you build a harness for the first time with `update harness`, set its image under **Settings → Harnesses** to `docker.io/hyperbeam/harness-NAME:pi`.
 
 ## What a sandbox can reach

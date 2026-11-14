@@ -37,6 +37,8 @@ Sandboxes are torn down after 15 idle minutes. Work survives a teardown only if 
 
 A **harness** is the coding agent that runs inside the sandbox: Claude Code, Codex, Gemini CLI, OpenCode, or any agent that speaks the Agent Client Protocol (ACP) on stdio. A harness profile says which container image to use, how to start the agent, what credential it takes, which models it offers and which hosts it may reach. See [Harnesses and models](/harnesses).
 
+An **environment** is a container image with a project’s toolchains. A sandbox can run in one, with the harness’s agent carried in. See [Environments](/environments).
+
 ## Grants
 
 A **grant** is one thing an agent may do outside its sandbox, such as `github:open_pr` or `linear:write`. People hold grants, set by an admin. A session’s grants are fixed at launch to what its owner holds, optionally narrowed, and narrowed further if the owner later loses a grant. See [People and permissions](/permissions).

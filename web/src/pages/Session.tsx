@@ -18,6 +18,7 @@ import { AgentRow } from "./Board";
 interface Detail {
   session: Session;
   harness: { name: string; title: string; model: string | null } | null;
+  environment: { name: string; image: string } | null;
   children: Session[];
   parent: { id: string; title: string } | null;
   workstream: { id: string; title: string } | null;
@@ -307,6 +308,7 @@ export function SessionPage({ id }: { id: string }) {
                 ["Started by", <span className="flex items-center gap-1.5"><Avatar user={owner} size={18} className="ring-0" /> {owner?.name ?? "Unknown"}</span>],
                 ["Harness", data.harness?.title ?? "None"],
                 ["Model", data.harness?.model ?? <span className="text-muted">Harness default</span>],
+                ...(data.environment ? [["Environment", <span title={data.environment.image}>{data.environment.name}</span>] as [ReactNode, ReactNode]] : []),
                 ...(session.workflow ? [["Workflow", session.workflow] as [ReactNode, ReactNode]] : []),
                 ["Created", <Time iso={session.created_at} />],
                 ...(session.repos.length > 0

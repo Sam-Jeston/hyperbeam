@@ -1742,3 +1742,66 @@ async fn agents_are_started_and_directed_from_discord() {
     // The first agent was not touched.
     assert_ne!(owner.session(id).await["status"], "cancelled");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repositories_choose_an_environment_and_run_their_setup() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    h.connect_github(&owner).await;
+
+    let rust = owner.post("/environments", json!({ "name": "rust", "image": "rust:1.90", "description": "Rust and cargo" })).await;
+    let rust_id = rust["environment"]["id"].as_str().unwrap().to_string();
+    owner.post("/environments", json!({ "name": "python", "image": "python:3.13" })).await;
+    for bad in [json!({ "name": "none", "image": "x" }), json!({ "name": "rust", "image": "x" }), json!({ "name": "go", "image": "" })] {
+        let (status, _) = owner.call(Method::POST, "/environments", Some(bad.clone())).await;
+        assert!(status.is_client_error(), "{bad} -> {status}");
+    }
+
+    // The repository names its environment and how to get ready to work in it.
+    let repos = owner.get("/repos").await;
+    let repo_id = repos["repos"][0]["id"].as_str().unwrap().to_string();
+    let (status, _) = owner.call(Method::PATCH, &format!("/repos/{repo_id}"), Some(json!({ "environment": "missing" }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let repo = owner
+        .ok(Method::PATCH, &format!("/repos/{repo_id}"), Some(json!({ "environment": "rust", "setup_command": "echo ready > .setup-ran" })))
+        .await;
+    assert_eq!(repo["repo"]["environment_id"], rust_id.as_str());
+
+    let created = owner.post("/sessions", json!({ "prompt": "!sh cat demo/.setup-ran", "harness": "scripted", "repos": ["acme/demo"] })).await;
+    let id = created["session"]["id"].as_str().unwrap();
+    assert_eq!(created["session"]["environment_id"], rust_id.as_str());
+    let events = owner.wait_turns(id, 1).await;
+    assert!(tool_output(&events, "cat demo/.setup-ran").contains("ready"));
+    let notes = text_of(&events, "system");
+    assert!(notes.contains("in the rust environment"), "{notes}");
+    assert!(notes.contains("Running setup for acme/demo: echo ready > .setup-ran"), "{notes}");
+    assert!(notes.contains("Setup for acme/demo finished in "), "{notes}");
+    assert_eq!(owner.get(&format!("/sessions/{id}")).await["environment"]["name"], "rust");
+
+    // A person may choose another environment for one session, or none.
+    let chosen = |environment: &str| json!({ "prompt": "!say hi", "harness": "scripted", "repos": ["acme/demo"], "environment": environment });
+    assert_eq!(owner.post("/sessions", chosen("none")).await["session"]["environment_id"], Value::Null);
+    assert_ne!(owner.post("/sessions", chosen("python")).await["session"]["environment_id"], rust_id.as_str());
+    let (status, _) = owner.call(Method::POST, "/sessions", Some(chosen("missing"))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // A conductor placed somewhere on purpose takes its workers with it;
+    // one that was not leaves them to their repositories.
+    let delegate = r#"!mcp hyperbeam_spawn_agent {"title": "Part", "prompt": "!say Done.", "repos": ["acme/demo"]}"#;
+    for (environment, expected) in [(Some("python"), "python"), (None, "rust")] {
+        let mut body = json!({ "prompt": delegate, "harness": "scripted", "role": "conductor", "repos": ["acme/demo"] });
+        if let Some(environment) = environment {
+            body["environment"] = json!(environment);
+        }
+        let conductor = owner.post("/sessions", body).await;
+        let conductor_id = conductor["session"]["id"].as_str().unwrap();
+        owner.wait_turns(conductor_id, 1).await;
+        let child = owner.get(&format!("/sessions/{conductor_id}")).await["children"][0]["id"].as_str().unwrap().to_string();
+        assert_eq!(owner.get(&format!("/sessions/{child}")).await["environment"]["name"], expected);
+    }
+
+    // Without the environment, the repository goes back to the harness image.
+    owner.ok(Method::DELETE, &format!("/environments/{rust_id}"), None).await;
+    assert_eq!(owner.get("/repos").await["repos"][0]["environment_id"], Value::Null);
+    assert_eq!(owner.session(id).await["environment_id"], Value::Null);
+}

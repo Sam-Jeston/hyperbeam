@@ -1,4 +1,4 @@
-import { Cpu, FolderGit2, KeyRound, Lock, Pencil, Plus, RefreshCw, ScrollText, Trash2, Zap } from "lucide-react";
+import { Container, Cpu, FolderGit2, KeyRound, Lock, Pencil, Plus, RefreshCw, ScrollText, Trash2, Zap } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/controls";
@@ -7,7 +7,7 @@ import { Field, Input, Textarea } from "../components/ui/input";
 import { LinkTabs } from "../components/ui/menu";
 import { Select } from "../components/ui/select";
 import { Badge, Card, EmptyState, Notice, Skeleton } from "../components/ui/surface";
-import { api, type CodeHost, type CredentialSlot, type Harness, modelLabel, type Repo } from "../lib/api";
+import { api, type CodeHost, type CredentialSlot, type Environment, type Harness, modelLabel, type Repo } from "../lib/api";
 import { refreshMe, useStore } from "../lib/store";
 import { ChatApps, ChatIdentities } from "./Chat";
 import { Connections } from "./Connections";
@@ -19,6 +19,7 @@ const TABS: { value: string; label: string; adminOnly: boolean }[] = [
   { value: "chat", label: "Chat apps", adminOnly: false },
   { value: "repositories", label: "Repositories", adminOnly: false },
   { value: "harnesses", label: "Harnesses", adminOnly: false },
+  { value: "environments", label: "Environments", adminOnly: false },
   { value: "general", label: "General", adminOnly: true },
   { value: "audit", label: "Audit log", adminOnly: true },
   { value: "account", label: "My account", adminOnly: false },
@@ -37,6 +38,7 @@ export function SettingsPage({ tab }: { tab: string }) {
       {active === "repositories" ? <Repositories isAdmin={isAdmin} /> :
        active === "chat" ? <ChatApps isAdmin={isAdmin} /> :
        active === "harnesses" ? <Harnesses isAdmin={isAdmin} /> :
+       active === "environments" ? <Environments isAdmin={isAdmin} /> :
        active === "general" ? <General /> :
        active === "audit" ? <Audit /> :
        active === "account" ? <Account /> :
@@ -224,6 +226,8 @@ function IntegrationDialog({ integration, onClose }: { integration: Integration;
 function Repositories({ isAdmin }: { isAdmin: boolean }) {
   const { data, error, reload } = useLoad<{ repos: Repo[] }>(() => api.get("/repos"), []);
   const integrations = useLoad<{ integrations: Integration[] }>(() => api.get("/integrations"), []);
+  const environments = useLoad<{ environments: Environment[] }>(() => api.get("/environments"), []);
+  const [editing, setEditing] = useState<Repo | null>(null);
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<CodeHost | "">("");
   const action = useAction();
@@ -273,14 +277,153 @@ function Repositories({ isAdmin }: { isAdmin: boolean }) {
                 </div>
                 {(connected.length > 1 || repo.host !== "github") && <Badge tone="outline">{systemName(repo.host)}</Badge>}
                 <Badge tone="outline" mono>{repo.default_branch}</Badge>
+                {repo.environment_id && <Badge tone="outline"><Container /> {environments.data?.environments.find((e) => e.id === repo.environment_id)?.name ?? "Environment"}</Badge>}
+                {repo.setup_command && <Badge tone="outline" title={repo.setup_command}>Setup command</Badge>}
                 {repo.accessible ? <Badge tone="run">You have access</Badge> : <Badge><Lock /> No access</Badge>}
+                {isAdmin && <Button variant="ghost" size="icon-sm" aria-label={`Edit ${repo.full_name}`} onClick={() => setEditing(repo)}><Pencil /></Button>}
                 {isAdmin && <Button variant="ghost" size="icon-sm" aria-label={`Remove ${repo.full_name}`} onClick={() => void remove(repo)}><Trash2 /></Button>}
               </div>
             ))}
           </Card>
         )}
       </div>
+      {editing && <RepoDialog repo={editing} environments={environments.data?.environments ?? []} onClose={() => (setEditing(null), reload())} />}
     </>
+  );
+}
+
+function RepoDialog({ repo, environments, onClose }: { repo: Repo; environments: Environment[]; onClose: () => void }) {
+  const [environment, setEnvironment] = useState(environments.find((e) => e.id === repo.environment_id)?.name ?? "");
+  const [setup, setSetup] = useState(repo.setup_command);
+  const action = useAction();
+  const save = () =>
+    action.run(async () => (await api.patch(`/repos/${repo.id}`, { environment: environment || null, setup_command: setup }), onClose()), { success: `Saved ${repo.full_name}` });
+  return (
+    <Modal
+      title={repo.full_name}
+      description="How sandboxes are prepared for agents working on this repository."
+      onClose={onClose}
+      modalOnly
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={action.busy} onClick={() => void save()}>Save</Button>
+        </>
+      }
+    >
+      <Field
+        label="Environment"
+        hint={environments.length === 0
+          ? <>There are no environments yet. Add one under <A href="/settings/environments" className="text-primary hover:underline">Environments</A> to give agents this project’s toolchains.</>
+          : "The image agents on this repository run in, unless whoever starts them chooses another."}
+      >
+        {(id) => (
+          <Select
+            id={id}
+            value={environment}
+            onValueChange={setEnvironment}
+            options={[{ value: "", label: "None (harness image)" }, ...environments.map((e) => ({ value: e.name, label: e.name, description: e.description || e.image }))]}
+          />
+        )}
+      </Field>
+      <Field label="Setup command" optional hint="Run with sh in each fresh checkout, before the agent starts: fetch dependencies, warm a build. It can reach the hosts on the egress allowlist. If it fails, the agent starts anyway and the session log shows the output.">
+        {(id) => <Textarea id={id} mono rows={3} className="min-h-0" value={setup} onChange={(e) => setSetup(e.target.value)} placeholder="cargo fetch" />}
+      </Field>
+      <ErrorNote error={action.error} />
+    </Modal>
+  );
+}
+
+// -------------------------------------------------------------- environments
+
+function Environments({ isAdmin }: { isAdmin: boolean }) {
+  const { data, error, reload } = useLoad<{ environments: Environment[] }>(() => api.get("/environments"), []);
+  const repos = useLoad<{ repos: Repo[] }>(() => api.get("/repos"), []);
+  const [editing, setEditing] = useState<Environment | "new" | null>(null);
+  return (
+    <>
+      <Lead action={isAdmin && <Button onClick={() => setEditing("new")}><Plus /> Add an environment</Button>}>
+        An environment is a container image with the tools a project needs: compilers, package managers, test dependencies. Agents run in it with those already installed, whichever harness they use. Assign one to a repository under <A href="/settings/repositories" className="text-primary hover:underline">Repositories</A>.
+      </Lead>
+      <ErrorNote error={error} />
+      {!data && !error && <CardsSkeleton n={2} />}
+      {data && data.environments.length === 0 && (
+        <EmptyState icon={<Container />} title="No environments yet">
+          {isAdmin
+            ? "Without one, agents run in the harness image, which has git and Node.js and little else. Add the image your CI builds in, or a public one such as rust:1.90."
+            : "Agents run in the harness image. Ask an admin to add an environment with your project’s tools."}
+        </EmptyState>
+      )}
+      <div className="grid gap-3">
+        {data?.environments.map((environment) => {
+          const used = (repos.data?.repos ?? []).filter((r) => r.environment_id === environment.id);
+          return (
+            <Card key={environment.id} className="flex flex-wrap items-start gap-4 p-4">
+              <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground"><Container className="size-5" /></div>
+              <div className="min-w-0 flex-1">
+                <h2 className="font-mono text-[14px] font-semibold">{environment.name}</h2>
+                {environment.description && <p className="mt-0.5 text-[13px] text-muted">{environment.description}</p>}
+                <div className="mt-1.5 truncate font-mono text-[11.5px] text-faint">{environment.image}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted">
+                  {used.length === 0 ? "Not the default for any repository" : <>Default for {used.map((r) => <Badge key={r.id} tone="outline" mono>{r.full_name}</Badge>)}</>}
+                </div>
+              </div>
+              {isAdmin && <Button size="sm" onClick={() => setEditing(environment)}><Pencil /> Edit</Button>}
+            </Card>
+          );
+        })}
+      </div>
+      {editing && <EnvironmentDialog environment={editing === "new" ? null : editing} onClose={() => (setEditing(null), reload())} />}
+    </>
+  );
+}
+
+function EnvironmentDialog({ environment, onClose }: { environment: Environment | null; onClose: () => void }) {
+  const [name, setName] = useState(environment?.name ?? "");
+  const [description, setDescription] = useState(environment?.description ?? "");
+  const [image, setImage] = useState(environment?.image ?? "");
+  const action = useAction();
+  const save = () =>
+    action.run(async () => {
+      const body = { name: name.trim(), description, image: image.trim() };
+      await (environment ? api.patch(`/environments/${environment.id}`, body) : api.post("/environments", body));
+      onClose();
+    }, { success: environment ? "Environment saved" : "Environment added" });
+  const remove = async () => {
+    const ok = await confirm({
+      title: `Delete ${environment!.name}?`,
+      description: "Repositories and agents that use it go back to the harness image. Workflows that name it will stop working. The image itself is untouched.",
+      confirmLabel: "Delete environment",
+      destructive: true,
+    });
+    if (ok) void action.run(async () => (await api.del(`/environments/${environment!.id}`), onClose()), { success: "Environment deleted" });
+  };
+  return (
+    <Modal
+      title={environment ? `Edit ${environment.name}` : "Add an environment"}
+      onClose={onClose}
+      modalOnly
+      footer={
+        <>
+          {environment && <Button variant="danger-ghost" className="mr-auto" disabled={action.busy} onClick={() => void remove()}><Trash2 /> Delete</Button>}
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={!name.trim() || !image.trim()} loading={action.busy} onClick={() => void save()}>Save</Button>
+        </>
+      }
+    >
+      {!environment && (
+        <Field label="Name" hint="Lowercase letters, digits and dashes. Used in workflows and with --environment.">
+          {(id) => <Input id={id} mono value={name} onChange={(e) => setName(e.target.value)} placeholder="rust" />}
+        </Field>
+      )}
+      <Field label="Container image" hint="Any image the cluster can pull that has git and is built on glibc (Debian, Ubuntu, Fedora; not Alpine). It runs as user 1000, not root, so install tools where every user can run them.">
+        {(id) => <Input id={id} mono value={image} onChange={(e) => setImage(e.target.value)} placeholder="rust:1.90" />}
+      </Field>
+      <Field label="Description" optional>
+        {(id) => <Input id={id} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Rust, cargo and the system libraries the API links against" />}
+      </Field>
+      <ErrorNote error={action.error} />
+    </Modal>
   );
 }
 

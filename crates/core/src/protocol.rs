@@ -10,6 +10,14 @@ use uuid::Uuid;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Where a harness image keeps its agent: launchers in `bin`, a runtime of
+/// its own in `libexec`. Self-contained, so that it can be carried into an
+/// environment image and run there from the same path.
+pub const HARNESS_DIR: &str = "/opt/harness";
+/// Left in a sandbox's home when the image's own home directory was too big
+/// to carry over. Holds the size in bytes.
+pub const HOME_SKIPPED_MARKER: &str = ".hyperbeam-home-skipped";
+
 /// Everything a runner needs to prepare a workspace and start a harness.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunSpec {
@@ -59,6 +67,10 @@ pub struct RepoSpec {
     /// The checkout's `origin` is under it; git reaches it through the proxy.
     #[serde(default = "github_url")]
     pub host_url: String,
+    /// Run with `sh -c` in the fresh checkout before the harness starts, to
+    /// fetch dependencies or warm a build. Empty for none.
+    #[serde(default)]
+    pub setup_command: String,
 }
 
 fn github_url() -> String {
@@ -208,7 +220,7 @@ mod tests {
         let r: RepoSpec = serde_json::from_value(serde_json::json!({ "full_name": "acme/api", "default_branch": "main" })).unwrap();
         assert_eq!(r.dir_name(), "api");
         assert_eq!(r.clone_url(), "https://github.com/acme/api.git");
-        let nested = RepoSpec { full_name: "acme/platform/api".into(), default_branch: "main".into(), host_url: "https://git.acme.dev/".into() };
+        let nested = RepoSpec { full_name: "acme/platform/api".into(), default_branch: "main".into(), host_url: "https://git.acme.dev/".into(), setup_command: String::new() };
         assert_eq!(nested.dir_name(), "api");
         assert_eq!(nested.clone_url(), "https://git.acme.dev/acme/platform/api.git");
     }

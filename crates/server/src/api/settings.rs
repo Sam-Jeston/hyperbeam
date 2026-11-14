@@ -3,7 +3,8 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::gateway::web;
 use crate::integrations::{self, Host, KINDS, gitlab};
-use crate::store::{self, CredentialSlot, Harness, ModelChoice, Repo, Skill, Workflow};
+use crate::sessions::NO_ENVIRONMENT;
+use crate::store::{self, CredentialSlot, Environment, Harness, ModelChoice, Repo, Skill, Workflow};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::{DateTime, Utc};
@@ -299,6 +300,111 @@ pub async fn add_repo(State(app): State<App>, actor: AuthUser, Json(body): Json<
 pub async fn delete_repo(State(app): State<App>, actor: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
     actor.require_admin()?;
     sqlx::query("DELETE FROM repos WHERE id = $1").bind(id).execute(&app.db).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct RepoBody {
+    /// The environment agents on this repository run in, by name. `null` or
+    /// empty for none.
+    #[serde(default, deserialize_with = "super::nullable")]
+    environment: Option<Option<String>>,
+    setup_command: Option<String>,
+}
+
+pub async fn update_repo(State(app): State<App>, actor: AuthUser, Path(id): Path<Uuid>, Json(body): Json<RepoBody>) -> ApiResult<Json<Value>> {
+    actor.require_admin()?;
+    let current: Repo = sqlx::query_as("SELECT * FROM repos WHERE id = $1").bind(id).fetch_optional(&app.db).await?.ok_or(ApiError::NotFound("repository"))?;
+    let environment_id = match body.environment {
+        None => current.environment_id,
+        Some(name) => match name.as_deref().map(str::trim).filter(|name| !name.is_empty()) {
+            None => None,
+            Some(name) => Some(store::environment_by_name(&app.db, name).await?.ok_or_else(|| ApiError::bad(format!("no environment named `{name}`")))?.id),
+        },
+    };
+    let setup_command = body.setup_command.map(|command| command.trim().to_string()).unwrap_or(current.setup_command);
+    if setup_command.len() > 4000 {
+        return Err(ApiError::bad("the setup command is too long (limit 4,000 characters). Put longer setup in a script in the repository and run that."));
+    }
+    let repo: Repo = sqlx::query_as("UPDATE repos SET environment_id = $2, setup_command = $3 WHERE id = $1 RETURNING *")
+        .bind(id)
+        .bind(environment_id)
+        .bind(setup_command)
+        .fetch_one(&app.db)
+        .await?;
+    Ok(Json(json!({ "repo": repo })))
+}
+
+// -------------------------------------------------------------- environments
+
+pub async fn list_environments(State(app): State<App>, _user: AuthUser) -> ApiResult<Json<Value>> {
+    let environments: Vec<Environment> = sqlx::query_as("SELECT * FROM environments ORDER BY name").fetch_all(&app.db).await?;
+    Ok(Json(json!({ "environments": environments })))
+}
+
+#[derive(Deserialize)]
+pub struct EnvironmentBody {
+    name: Option<String>,
+    description: Option<String>,
+    image: Option<String>,
+}
+
+fn environment_image(image: &str) -> ApiResult<String> {
+    let image = image.trim();
+    if image.is_empty() || image.len() > 500 || image.contains(char::is_whitespace) {
+        return Err(ApiError::bad("give the container image as a reference, such as rust:1.90 or ghcr.io/acme/dev:latest"));
+    }
+    Ok(image.to_string())
+}
+
+pub async fn create_environment(State(app): State<App>, actor: AuthUser, Json(body): Json<EnvironmentBody>) -> ApiResult<Json<Value>> {
+    actor.require_admin()?;
+    let name = body.name.as_deref().map(str::trim).unwrap_or_default().to_string();
+    if !valid_slug(&name) || name == NO_ENVIRONMENT {
+        return Err(ApiError::bad(format!("the environment name must be lowercase letters, digits and dashes, and not `{NO_ENVIRONMENT}`")));
+    }
+    let image = environment_image(body.image.as_deref().unwrap_or_default())?;
+    let environment: Environment = sqlx::query_as("INSERT INTO environments (id, name, description, image) VALUES ($1, $2, $3, $4) RETURNING *")
+        .bind(Uuid::now_v7())
+        .bind(&name)
+        .bind(body.description.as_deref().unwrap_or("").trim())
+        .bind(image)
+        .fetch_one(&app.db)
+        .await
+        .map_err(|err| match ApiError::from(err) {
+            ApiError::Conflict(_) => ApiError::Conflict(format!("there is already an environment named {name}")),
+            other => other,
+        })?;
+    Ok(Json(json!({ "environment": environment })))
+}
+
+/// The name is how repositories, workflows and people refer to an
+/// environment, so it stays; the image and description may change.
+pub async fn update_environment(
+    State(app): State<App>,
+    actor: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<EnvironmentBody>,
+) -> ApiResult<Json<Value>> {
+    actor.require_admin()?;
+    let current = store::environment_by_id(&app.db, id).await?.ok_or(ApiError::NotFound("environment"))?;
+    let image = match &body.image {
+        Some(image) => environment_image(image)?,
+        None => current.image,
+    };
+    let environment: Environment = sqlx::query_as("UPDATE environments SET description = $2, image = $3 WHERE id = $1 RETURNING *")
+        .bind(id)
+        .bind(body.description.as_deref().map(str::trim).unwrap_or(&current.description))
+        .bind(image)
+        .fetch_one(&app.db)
+        .await?;
+    Ok(Json(json!({ "environment": environment })))
+}
+
+/// Repositories and sessions that used it fall back to the harness image.
+pub async fn delete_environment(State(app): State<App>, actor: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
+    actor.require_admin()?;
+    sqlx::query("DELETE FROM environments WHERE id = $1").bind(id).execute(&app.db).await?;
     Ok(Json(json!({ "ok": true })))
 }
 

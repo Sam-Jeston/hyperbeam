@@ -6,7 +6,7 @@ use crate::crypto;
 use crate::error::{ApiError, ApiResult};
 use crate::integrations::Host;
 use crate::sandbox::LaunchRequest;
-use crate::store::{self, Event, Harness, Question, Session, User};
+use crate::store::{self, Event, Harness, Question, Repo, Session, User};
 use anyhow::{Context, Result, anyhow};
 use hyperbeam_core::protocol::{HarnessSpec, RepoSpec, RunSpec, RunnerMsg, ServerMsg, SessionStatus, SkillSpec, event};
 use hyperbeam_core::workflow::SessionRole;
@@ -22,6 +22,8 @@ use uuid::Uuid;
 /// A runner that drops its connection gets this long to come back.
 const RECONNECT_GRACE: Duration = Duration::from_secs(200);
 const MAX_LIVE_CHILDREN: i64 = 8;
+/// Given in place of an environment's name to run in the harness image.
+pub const NO_ENVIRONMENT: &str = "none";
 
 /// In-memory state for a session that owns a sandbox.
 struct Live {
@@ -70,6 +72,9 @@ pub struct NewSession {
     pub workflow: Option<String>,
     /// Model to run on; `None` for the harness profile's default.
     pub model: Option<String>,
+    /// Environment to run in, by name. `None` takes the repositories'
+    /// default; `none` insists on the harness image.
+    pub environment: Option<String>,
     /// Background the agent is shown after the prompt but that no person
     /// vouched for, such as the earlier messages of a chat thread. URLs in it
     /// are not ones the agent may fetch.
@@ -272,6 +277,40 @@ impl App {
         Ok(workstream)
     }
 
+    /// The environment the first of these repositories that has one asks for.
+    async fn default_environment(&self, repos: &[String]) -> sqlx::Result<Option<Uuid>> {
+        for name in repos {
+            if let Some(Repo { environment_id: Some(id), .. }) = store::repo_by_name(&self.db, name).await? {
+                return Ok(Some(id));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Which environment a new session runs in. A name given outright wins.
+    /// Otherwise a worker keeps an environment a person chose for its
+    /// conductor, and failing that the session's repositories decide, with
+    /// the conductor's environment as the last resort.
+    async fn choose_environment(&self, named: Option<&str>, repos: &[String], parent: Option<&Session>) -> ApiResult<Option<Uuid>> {
+        match named.map(str::trim).filter(|name| !name.is_empty()) {
+            Some(NO_ENVIRONMENT) => return Ok(None),
+            Some(name) => {
+                let found = store::environment_by_name(&self.db, name).await?;
+                return Ok(Some(found.ok_or_else(|| ApiError::bad(format!("no environment named `{name}`")))?.id));
+            }
+            None => {}
+        }
+        if let Some(parent) = parent {
+            // The conductor is not where its own repositories would put it,
+            // so someone placed it there on purpose.
+            if parent.environment_id != self.default_environment(&parent.repos).await? {
+                return Ok(parent.environment_id);
+            }
+        }
+        let default = self.default_environment(repos).await?;
+        Ok(default.or(parent.and_then(|parent| parent.environment_id)))
+    }
+
     pub async fn create_session(&self, user: &User, new: NewSession) -> ApiResult<Session> {
         let prompt = new.prompt.trim().to_string();
         if prompt.is_empty() {
@@ -307,6 +346,8 @@ impl App {
                 )));
             }
         }
+
+        let environment_id = self.choose_environment(new.environment.as_deref(), &new.repos, new.parent.as_ref()).await?;
 
         // An agent never holds more than the person who launched it, nor more
         // than the agent that spawned it.
@@ -386,8 +427,8 @@ impl App {
 
         let session: Session = sqlx::query_as(&format!(
             "INSERT INTO sessions (id, workstream_id, parent_id, title, role, harness_id, created_by, workflow,
-                                   repos, skills, grants, work_branch, model)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                                   repos, skills, grants, work_branch, model, environment_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
              RETURNING {}",
             store::SESSION_COLUMNS
         ))
@@ -404,6 +445,7 @@ impl App {
         .bind(json!(grants))
         .bind(&work_branch)
         .bind(&model)
+        .bind(environment_id)
         .fetch_one(&self.db)
         .await?;
 
@@ -619,18 +661,18 @@ impl App {
             );
         }
         // Claim the session; another task (or an end_session) may have raced.
-        let claimed: Option<(Uuid, i32)> = sqlx::query_as(
+        let claimed: Option<(Uuid, i32, Option<Uuid>)> = sqlx::query_as(
             "UPDATE sessions
              SET status = 'starting', run_token_hash = $2, launches = launches + 1,
                  started_at = COALESCE(started_at, now()), ended_at = NULL, error = NULL
              WHERE id = $1 AND status = 'pending'
-             RETURNING harness_id, launches",
+             RETURNING harness_id, launches, environment_id",
         )
         .bind(session_id)
         .bind(crypto::hash_token(&token))
         .fetch_optional(&self.db)
         .await?;
-        let Some((harness_id, launches)) = claimed else {
+        let Some((harness_id, launches, environment_id)) = claimed else {
             self.live.map.lock().unwrap().remove(&session_id);
             return Ok(());
         };
@@ -638,20 +680,22 @@ impl App {
         self.publish_session(session_id).await;
 
         let harness = store::harness_by_id(&self.db, harness_id).await?.ok_or_else(|| anyhow!("harness profile was deleted"))?;
-        self.note(
-            session_id,
-            if launches > 1 {
-                format!("Resuming in a fresh {} sandbox ({})", self.driver.name(), harness.title)
-            } else {
-                format!("Starting a {} sandbox ({})", self.driver.name(), harness.title)
-            },
-        )
-        .await;
+        let environment = match environment_id {
+            Some(id) => store::environment_by_id(&self.db, id).await?,
+            None => None,
+        };
+        let sandbox = match &environment {
+            Some(environment) => format!("{} sandbox ({}, in the {} environment)", self.driver.name(), harness.title, environment.name),
+            None => format!("{} sandbox ({})", self.driver.name(), harness.title),
+        };
+        self.note(session_id, if launches > 1 { format!("Resuming in a fresh {sandbox}") } else { format!("Starting a {sandbox}") }).await;
 
         let request = LaunchRequest {
             session_id,
             token,
-            image: harness.image.clone(),
+            // In an environment, the agent is carried over from the harness image.
+            image: environment.as_ref().map_or_else(|| harness.image.clone(), |environment| environment.image.clone()),
+            harness_image: environment.is_some().then(|| harness.image.clone()),
             server_url: self.cfg.internal_url.clone(),
             env: BTreeMap::new(),
         };
@@ -713,7 +757,7 @@ impl App {
             if let Some(repo) = store::repo_by_name(&self.db, name).await? {
                 let host = Host::parse(&repo.host).unwrap_or(Host::Github);
                 let host_url = self.host_web_url(host).await?;
-                repos.push(RepoSpec { full_name: repo.full_name, default_branch: repo.default_branch, host_url });
+                repos.push(RepoSpec { full_name: repo.full_name, default_branch: repo.default_branch, host_url, setup_command: repo.setup_command });
                 if !hosts.contains(&host) {
                     hosts.push(host);
                 }

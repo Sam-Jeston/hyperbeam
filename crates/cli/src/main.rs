@@ -45,6 +45,10 @@ enum Command {
         /// Model to run on; defaults to the harness profile's.
         #[arg(long, short)]
         model: Option<String>,
+        /// Environment to run in; defaults to the repository's. `none` runs
+        /// in the harness image.
+        #[arg(long, short)]
+        environment: Option<String>,
         /// Start a conductor that delegates to worker agents.
         #[arg(long)]
         conductor: bool,
@@ -69,6 +73,9 @@ enum Command {
         /// Model to run on; overrides the workflow's.
         #[arg(long, short)]
         model: Option<String>,
+        /// Environment to run in; overrides the workflow's.
+        #[arg(long, short)]
+        environment: Option<String>,
         #[arg(long)]
         workstream: Option<String>,
         #[arg(long, short)]
@@ -389,7 +396,7 @@ async fn run() -> Result<()> {
             let grants: Vec<&str> = user["grants"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             println!("Your agents may: {}", if grants.is_empty() { "nothing outside their sandbox".to_string() } else { grants.join(", ") });
         }
-        Command::Run { prompt, repos, skills, harness, model, conductor, workstream, grants, follow } => {
+        Command::Run { prompt, repos, skills, harness, model, environment, conductor, workstream, grants, follow } => {
             let client = Client::load()?;
             let mut body = json!({
                 "prompt": prompt,
@@ -403,6 +410,9 @@ async fn run() -> Result<()> {
             if let Some(model) = model {
                 body["model"] = json!(model);
             }
+            if let Some(environment) = environment {
+                body["environment"] = json!(environment);
+            }
             if let Some(title) = workstream {
                 body["new_workstream"] = json!(title);
             }
@@ -412,7 +422,7 @@ async fn run() -> Result<()> {
             let created = client.post("/sessions", body).await?;
             started(&client, &created["session"], follow).await?;
         }
-        Command::Workflow { name, inputs, model, workstream, follow } => {
+        Command::Workflow { name, inputs, model, environment, workstream, follow } => {
             let client = Client::load()?;
             let workflows = client.get("/workflows").await?;
             let workflow = workflows["workflows"]
@@ -429,6 +439,9 @@ async fn run() -> Result<()> {
             let mut body = json!({ "inputs": values });
             if let Some(model) = model {
                 body["model"] = json!(model);
+            }
+            if let Some(environment) = environment {
+                body["environment"] = json!(environment);
             }
             if let Some(title) = workstream {
                 body["new_workstream"] = json!(title);

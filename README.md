@@ -268,8 +268,15 @@ To change the master key of an installation that holds credentials, run `hyperbe
 
 Any agent that speaks ACP on stdio can be added under *Settings → Harnesses*: a container image with
 `git` and the agent, the command that starts it, the environment variable its credential goes in, and
-the hosts it needs to reach. `deploy/docker/Dockerfile.harness` is a starting point; add your language
-toolchains to it so agents can build and test your code.
+the hosts it needs to reach. `deploy/docker/Dockerfile.harness` is a starting point.
+
+### Environments
+
+To give agents your language toolchains, add an environment under *Settings → Environments*: any
+glibc-based image with `git`, such as `rust:1.90` or the image your CI builds in. Assign it to a
+repository and agents working there run in it, with the coding agent carried in from the harness
+image. A repository can also have a setup command (`cargo fetch`, `bun install`) that runs in each
+fresh checkout before the agent starts.
 
 ## Development
 

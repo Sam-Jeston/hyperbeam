@@ -236,6 +236,8 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
                         model: arg_opt(args, "model").map(str::to_string).or_else(|| {
                             arg_opt(args, "harness").is_none().then(|| session.model.clone()).flatten()
                         }),
+                        // Settled from the worker's repositories and this session's own.
+                        environment: None,
                         context: None,
                     },
                 )

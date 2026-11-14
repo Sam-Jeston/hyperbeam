@@ -13,6 +13,7 @@ description: Build a feature across repositories and open pull requests
 role: conductor            # or: worker
 # harness: claude-code     # defaults to the team's
 # model: sonnet            # defaults to the harness profile's
+# environment: rust        # defaults to the repositories'
 repos:
   - owner/api
   - owner/web

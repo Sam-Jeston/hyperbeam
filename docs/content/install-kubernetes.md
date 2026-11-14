@@ -23,7 +23,7 @@ docker build -f deploy/docker/Dockerfile --target runner -t REGISTRY/hyperbeam/r
 docker build -f deploy/docker/Dockerfile.harness --target claude-code -t REGISTRY/hyperbeam/harness-claude-code:0.1.0 .
 ```
 
-Push them to your registry. Build a harness image for each agent you plan to use, and add your language toolchains to `Dockerfile.harness` so agents can build and test your code.
+Push them to your registry. Build a harness image for each agent you plan to use. Your language toolchains go in an [environment](/environments), an image of your own that agents run in.
 
 ## Install the chart
 

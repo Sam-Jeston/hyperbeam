@@ -1,0 +1,27 @@
+#!/bin/sh
+# Install npm packages as a harness's agent: under /opt/harness, with
+# launchers in /opt/harness/bin that run on the Node.js kept beside them.
+#
+#   harness-install @agentclientprotocol/claude-agent-acp
+#
+# /opt/harness is then self-contained. Hyperbeam carries it into an
+# environment image, where it must not depend on that image having Node.js,
+# or on which version it has.
+set -eu
+
+prefix=/opt/harness
+npm install -g --prefix "$prefix" "$@"
+npm cache clean --force
+
+# npm leaves symlinks to scripts that start with `#!/usr/bin/env node`.
+for link in "$prefix"/bin/*; do
+  [ -L "$link" ] || continue
+  target=$(readlink -f "$link")
+  rm "$link"
+  if head -n 1 "$target" | grep -q node; then
+    printf '#!/bin/sh\nexec %s/libexec/node "%s" "$@"\n' "$prefix" "$target" > "$link"
+  else
+    printf '#!/bin/sh\nexec "%s" "$@"\n' "$target" > "$link"
+  fi
+  chmod 755 "$link"
+done

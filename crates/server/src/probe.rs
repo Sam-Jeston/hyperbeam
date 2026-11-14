@@ -94,6 +94,7 @@ impl App {
             session_id: probe.id,
             token,
             image: harness.image.clone(),
+            harness_image: None,
             server_url: self.cfg.internal_url.clone(),
             env: BTreeMap::new(),
         };

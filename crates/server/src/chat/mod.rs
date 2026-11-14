@@ -810,6 +810,7 @@ async fn launch(app: &App, kind: Kind, platform: &dyn Platform, user: &User, pla
             grants: None,
             workflow: None,
             model: None,
+            environment: None,
             context: start.context.clone(),
         };
         match app.create_session(user, new).await {
