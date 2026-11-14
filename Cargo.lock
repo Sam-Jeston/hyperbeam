@@ -1787,6 +1787,7 @@ dependencies = [
  "rand 0.8.8",
  "reqwest",
  "rust-embed",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",

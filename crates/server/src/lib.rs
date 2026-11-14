@@ -31,6 +31,11 @@ use std::sync::Arc;
 
 /// Connect to the database, migrate, and assemble the application.
 pub async fn build(cfg: Config) -> Result<(App, Router)> {
+    // Our dependencies between them compile in two TLS crypto providers
+    // (ring, and aws-lc through the AWS SDK), so rustls will not pick one
+    // itself and panics on the first connection that leaves it to choose,
+    // the Kubernetes client's. Already chosen is fine.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     // A key given directly is checked before anything else, so a typo fails
     // at once rather than after the wait for Postgres.
     if let Some(key) = &cfg.master_key.master_key {
