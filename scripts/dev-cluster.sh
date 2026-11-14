@@ -167,7 +167,7 @@ wait_ready() {
 point_harnesses() {
   local h sql=""
   for h in $HARNESSES; do
-    sql+="UPDATE harnesses SET image = '$(harness_image "$h")' WHERE name = '$h' AND image LIKE 'ghcr.io/hyperbeam/%';"
+    sql+="UPDATE harnesses SET image = '$(harness_image "$h")' WHERE name = '$h' AND image LIKE 'ghcr.io/%hyperbeam/harness-%';"
   done
   local out
   out=$(k -n "$NS" exec statefulset/hyperbeam-postgres -- psql -U hyperbeam -d hyperbeam -qtAc "$sql; SELECT name || ' -> ' || image FROM harnesses ORDER BY name" 2>&1) \

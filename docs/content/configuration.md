@@ -35,7 +35,7 @@ Exactly one of the three master key settings is required. See [Credentials](/cre
 | Variable | Default | Meaning |
 |---|---|---|
 | `HYPERBEAM_K8S_NAMESPACE` | `hyperbeam-agents` | Namespace sandboxes run in. |
-| `HYPERBEAM_RUNNER_IMAGE` | `ghcr.io/hyperbeam/runner:latest` | Image that carries the runner binary. Point it at the runner image you built. |
+| `HYPERBEAM_RUNNER_IMAGE` | `ghcr.io/sam-jeston/hyperbeam/runner:latest` | Image that carries the runner binary. The chart sets it from `agents.runnerImage`. |
 | `HYPERBEAM_K8S_IMAGE_PULL_POLICY` | `IfNotPresent` | Pull policy for sandbox images. |
 | `HYPERBEAM_K8S_CPU_LIMIT` | `2` | CPU limit per sandbox. |
 | `HYPERBEAM_K8S_MEMORY_LIMIT` | `4Gi` | Memory limit per sandbox. |

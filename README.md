@@ -117,25 +117,17 @@ it. The docs page *Run in a local cluster* covers backups, an external Postgres,
 
 ## Install on Kubernetes
 
-Build and push the images (the project does not publish images yet):
-
-```sh
-docker build -f deploy/docker/Dockerfile --target server -t REGISTRY/hyperbeam/server:0.1.0 .
-docker build -f deploy/docker/Dockerfile --target runner -t REGISTRY/hyperbeam/runner:0.1.0 .
-docker build -f deploy/docker/Dockerfile.harness --target claude-code -t REGISTRY/hyperbeam/harness-claude-code:0.1.0 .
-```
-
-Install the chart:
+The images are published to `ghcr.io/sam-jeston/hyperbeam/` for amd64 and arm64 on every push to
+`main` (`server`, `runner`, and a `harness-…` image per coding agent). The chart and the built-in
+harness profiles use them, so there is nothing to build:
 
 ```sh
 helm install hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --create-namespace \
   --set masterKey="$(openssl rand -base64 32)" \
-  --set image.repository=REGISTRY/hyperbeam/server \
-  --set agents.runnerImage.repository=REGISTRY/hyperbeam/runner \
   --set publicUrl=https://hyperbeam.example.com
 ```
 
-Then, in the UI, set each harness profile's image under *Settings → Harnesses* to the one you pushed.
+To run images you built yourself, see *Install on Kubernetes* in the docs.
 
 What the chart creates:
 

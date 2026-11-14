@@ -117,7 +117,7 @@ pub struct Config {
     pub k8s_namespace: String,
 
     /// Kubernetes driver: image that carries the runner binary.
-    #[arg(long, env = "HYPERBEAM_RUNNER_IMAGE", default_value = "ghcr.io/hyperbeam/runner:latest")]
+    #[arg(long, env = "HYPERBEAM_RUNNER_IMAGE", default_value = "ghcr.io/sam-jeston/hyperbeam/runner:latest")]
     pub runner_image: String,
 
     #[arg(long, env = "HYPERBEAM_K8S_IMAGE_PULL_POLICY", default_value = "IfNotPresent")]

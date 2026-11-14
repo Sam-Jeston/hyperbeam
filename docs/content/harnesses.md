@@ -9,7 +9,7 @@ A **harness** is the coding agent that runs inside each sandbox. Hyperbeam drive
 
 Hyperbeam ships profiles for **Claude Code**, **Codex**, **Gemini CLI** and **OpenCode**. Each needs a [credential](/credentials) before it can start.
 
-On Kubernetes, set each profile’s image to one you have built and pushed. See [Install on Kubernetes](/install-kubernetes#build-and-push-the-images).
+Each profile names a published image, so on Kubernetes they work as they are. To use an image you built, change the profile’s image. See [Install on Kubernetes](/install-kubernetes#images).
 
 ## Add a harness
 

@@ -27,6 +27,8 @@ HYPERBEAM_TEST_DATABASE_URL=postgres://hyperbeam:hyperbeam@127.0.0.1:5440/postgr
 (cd web && bun run typecheck && bun run build)
 ```
 
+GitHub Actions runs the same checks, with clippy and the docs build, on every pull request (`.github/workflows/test.yml`). On `main` they run first, and the container images are built and published only if they pass (`.github/workflows/images.yml`).
+
 The end-to-end tests need Postgres. Without `HYPERBEAM_TEST_DATABASE_URL` they are skipped. They run against stand-ins for the outside world: a fake GitHub and GitLab, fake MCP servers, and a fake Slack and Discord (`crates/server/tests/support/chat.rs`) that the chat apps dial out to. `cargo test -p hyperbeam-server --test chat_adapters` exercises the Slack and Discord clients alone and needs no database.
 
 ## The web app

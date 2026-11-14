@@ -1,0 +1,192 @@
+# Builds the container images and publishes them to GitHub Container Registry:
+#
+#   ghcr.io/<owner>/<repo>/server              the control plane
+#   ghcr.io/<owner>/<repo>/runner              the in-sandbox runner
+#   ghcr.io/<owner>/<repo>/harness-<agent>     one per coding agent
+#
+# Each is published for amd64 and arm64 under three tags: `latest`, the
+# commit (`sha-1a2b3c4`), and the Helm chart's appVersion, which is what the
+# chart installs when no tag is given.
+#
+# Nothing is built until the test suite (test.yml) has passed.
+#
+# Each architecture builds on a runner of its own kind; compiling the server
+# under emulation would take hours. The two results are then joined under
+# one name.
+name: Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/**
+      - web/**
+      - brand/**
+      - Cargo.toml
+      - Cargo.lock
+      - deploy/docker/**
+      - deploy/helm/hyperbeam/Chart.yaml
+      - .dockerignore
+      - .github/workflows/images.yml
+      - .github/workflows/test.yml
+  # Harness images install the newest release of their agent, so they are
+  # rebuilt from scratch every week even when nothing here has changed.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE: https://github.com/${{ github.repository }}
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  # The server and the runner come out of one compilation, so one job builds both.
+  core:
+    name: server and runner (${{ matrix.arch }})
+    needs: test
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Name the images
+        run: echo "PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build the server
+        id: server
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          target: server
+          labels: org.opencontainers.image.source=${{ env.SOURCE }}
+          outputs: type=image,name=${{ env.PREFIX }}/server,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=core-${{ matrix.arch }}
+          cache-to: type=gha,scope=core-${{ matrix.arch }},mode=max
+      - name: Build the runner
+        id: runner
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          target: runner
+          labels: org.opencontainers.image.source=${{ env.SOURCE }}
+          outputs: type=image,name=${{ env.PREFIX }}/runner,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=core-${{ matrix.arch }}
+      - name: Note the digests
+        run: |
+          mkdir -p digests/server digests/runner
+          digest="${{ steps.server.outputs.digest }}"; touch "digests/server/${digest#sha256:}"
+          digest="${{ steps.runner.outputs.digest }}"; touch "digests/runner/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-server-${{ matrix.arch }}
+          path: digests/server/*
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-runner-${{ matrix.arch }}
+          path: digests/runner/*
+          if-no-files-found: error
+          retention-days: 1
+
+  harness:
+    name: harness-${{ matrix.harness }} (${{ matrix.arch }})
+    needs: test
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        harness: [claude-code, codex, gemini, opencode]
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Name the image
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/harness-${{ matrix.harness }}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.harness
+          target: ${{ matrix.harness }}
+          labels: org.opencontainers.image.source=${{ env.SOURCE }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          # A cached layer would keep last week's agent.
+          no-cache: ${{ github.event_name == 'schedule' }}
+          cache-from: type=gha,scope=harness-${{ matrix.harness }}-${{ matrix.arch }}
+          cache-to: type=gha,scope=harness-${{ matrix.harness }}-${{ matrix.arch }},mode=max
+      - name: Note the digest
+        run: |
+          mkdir -p digests
+          digest="${{ steps.build.outputs.digest }}"; touch "digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-harness-${{ matrix.harness }}-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Join the two architectures of each image under its tags.
+  publish:
+    name: publish ${{ matrix.image }}
+    needs: [core, harness]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [server, runner, harness-claude-code, harness-codex, harness-gemini, harness-opencode]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy/helm/hyperbeam/Chart.yaml
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-${{ matrix.image }}-*
+          path: digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.image }}"
+          version=$(sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' deploy/helm/hyperbeam/Chart.yaml)
+          [ -n "$version" ] || { echo "no appVersion in Chart.yaml" >&2; exit 1; }
+          sources=()
+          for digest in digests/*; do sources+=("$image@sha256:$(basename "$digest")"); done
+          [ "${#sources[@]}" -eq 2 ] || { echo "expected two architectures, found ${#sources[@]}" >&2; exit 1; }
+          docker buildx imagetools create \
+            -t "$image:latest" -t "$image:sha-${GITHUB_SHA::7}" -t "$image:$version" \
+            "${sources[@]}"
+          docker buildx imagetools inspect "$image:latest"

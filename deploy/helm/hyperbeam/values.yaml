@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/hyperbeam/server
+  repository: ghcr.io/sam-jeston/hyperbeam/server
   tag: ""            # defaults to the chart's appVersion
   pullPolicy: IfNotPresent
 
@@ -48,7 +48,7 @@ agents:
   # Namespace agent pods run in. Created by the chart.
   namespace: hyperbeam-agents
   runnerImage:
-    repository: ghcr.io/hyperbeam/runner
+    repository: ghcr.io/sam-jeston/hyperbeam/runner
     tag: ""
   imagePullPolicy: IfNotPresent
   cpuLimit: "2"

@@ -10,28 +10,30 @@ To try the chart on your own machine first, without a registry, see [Run in a lo
 ## Before you start
 
 - A Kubernetes cluster whose CNI **enforces NetworkPolicy**, such as Calico or Cilium. See [Network isolation](#network-isolation).
-- A container registry your cluster can pull from.
 - [Helm](https://helm.sh) 3.
 
-## Build and push the images
+## Images
 
-The project does not publish images yet, so build them from the repository:
+The images are published to GitHub Container Registry for `amd64` and `arm64`, and built from `main` on every push:
 
-```bash
-docker build -f deploy/docker/Dockerfile --target server -t REGISTRY/hyperbeam/server:0.1.0 .
-docker build -f deploy/docker/Dockerfile --target runner -t REGISTRY/hyperbeam/runner:0.1.0 .
-docker build -f deploy/docker/Dockerfile.harness --target claude-code -t REGISTRY/hyperbeam/harness-claude-code:0.1.0 .
-```
+| Image | What it is |
+|---|---|
+| `ghcr.io/sam-jeston/hyperbeam/server` | The control plane. |
+| `ghcr.io/sam-jeston/hyperbeam/runner` | The runner that is copied into each sandbox. |
+| `ghcr.io/sam-jeston/hyperbeam/harness-claude-code` | One per coding agent: also `harness-codex`, `harness-gemini` and `harness-opencode`. |
 
-Push them to your registry. Build a harness image for each agent you plan to use. Your language toolchains go in an [environment](/environments), an image of your own that agents run in.
+Each has three tags: `latest`, one per commit such as `sha-1a2b3c4`, and the chart’s version. The chart and the built-in harness profiles use these images unless you say otherwise, so there is nothing to build. Harness images are also rebuilt weekly, to pick up new releases of the agents.
+
+Your language toolchains go in an [environment](/environments), an image of your own that agents run in.
+
+> [!NOTE]
+> A version tag and `latest` move as `main` moves, and a node keeps the copy it already pulled. To stay on one build, set `image.tag` and `agents.runnerImage.tag` to a `sha-` tag. To move to a newer one, change those tags.
 
 ## Install the chart
 
 ```bash
 helm install hyperbeam deploy/helm/hyperbeam --namespace hyperbeam --create-namespace \
   --set masterKey="$(openssl rand -base64 32)" \
-  --set image.repository=REGISTRY/hyperbeam/server \
-  --set agents.runnerImage.repository=REGISTRY/hyperbeam/runner \
   --set publicUrl=https://hyperbeam.example.com
 ```
 
@@ -60,7 +62,26 @@ The server needs an IAM role that allows `kms:GenerateDataKey` and `kms:Decrypt`
 
 or with a Pod Identity association for the `hyperbeam` service account. Set `aws.region` if you name the key or secret by anything other than its ARN and the pod has no `AWS_REGION`. [Credentials](/credentials#the-master-key) explains both options.
 
-Then open the UI, create the team, and under **Settings → Harnesses** set each harness profile’s image to the one you pushed. Continue with [Set up a team](/team-setup).
+Then open the UI and create the team. Continue with [Set up a team](/team-setup).
+
+### Build your own images
+
+To run a build of your own, or to keep the images in your own registry:
+
+```bash
+docker build -f deploy/docker/Dockerfile --target server -t REGISTRY/hyperbeam/server:0.1.0 .
+docker build -f deploy/docker/Dockerfile --target runner -t REGISTRY/hyperbeam/runner:0.1.0 .
+docker build -f deploy/docker/Dockerfile.harness --target claude-code -t REGISTRY/hyperbeam/harness-claude-code:0.1.0 .
+```
+
+Push them, and add these to the `helm install` command:
+
+```bash
+  --set image.repository=REGISTRY/hyperbeam/server \
+  --set agents.runnerImage.repository=REGISTRY/hyperbeam/runner \
+```
+
+Then, under **Settings → Harnesses**, set each harness profile’s image to the one you pushed.
 
 ## What the chart creates
 

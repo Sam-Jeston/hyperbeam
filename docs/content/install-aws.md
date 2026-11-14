@@ -83,7 +83,7 @@ Traefik requests the certificate when the chart is installed, so the record must
 
 ## 3. Build and push the images
 
-The project does not publish images yet, so build them from the repository. `t4g` instances are arm64, so images must be built for `linux/arm64`. `tf image_platform` prints the platform for your instance type.
+This guide keeps the images in the registry Terraform created, so build them from the repository. (The [published images](/install-kubernetes#images) work too, if you would rather not build.) `t4g` instances are arm64, so images must be built for `linux/arm64`. `tf image_platform` prints the platform for your instance type.
 
 ```bash
 aws ecr get-login-password | docker login --username AWS --password-stdin "$(tf registry)"

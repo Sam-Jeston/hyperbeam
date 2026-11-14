@@ -30,7 +30,7 @@ kind create cluster --name hyperbeam
 
 ## 2. Build the images and load them into the cluster
 
-The project does not publish images yet, so build them from the repository. Then load them into the kind node, so the cluster doesn’t need a registry.
+Build the images from your checkout, so that the cluster runs the code in front of you. Then load them into the kind node, so the cluster doesn’t need a registry.
 
 ```bash
 docker build -f deploy/docker/Dockerfile --target server -t hyperbeam/server:dev .

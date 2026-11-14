@@ -190,7 +190,7 @@ EOF
 point_harnesses() {
   local h sql=""
   for h in $HARNESSES; do
-    sql+="UPDATE harnesses SET image = '$(image "harness-$h")' WHERE name = '$h' AND image LIKE 'ghcr.io/hyperbeam/%';"
+    sql+="UPDATE harnesses SET image = '$(image "harness-$h")' WHERE name = '$h' AND image LIKE 'ghcr.io/%hyperbeam/harness-%';"
   done
   sql+="SELECT name || ' -> ' || image FROM harnesses ORDER BY name"
   log "Harness images:"
