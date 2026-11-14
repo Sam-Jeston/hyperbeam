@@ -273,14 +273,17 @@ fresh checkout before the agent starts.
 ## Development
 
 ```sh
-cargo build -p hyperbeam-runner -p hyperbeam-test-agent
-HYPERBEAM_TEST_DATABASE_URL=postgres://hyperbeam:hyperbeam@127.0.0.1:5440/postgres cargo test --workspace
-(cd web && bun run typecheck && bun run build)
+scripts/test.sh                                         # everything CI runs, with a test Postgres in Docker
+scripts/test.sh rust -p hyperbeam-server --test e2e     # just some Rust tests (args go to cargo test)
+scripts/test.sh db-stop                                 # remove the test Postgres
 ```
 
 The end-to-end tests start a real server, real runner processes driving a scripted ACP agent
 (`crates/test-agent`, not shipped), and a fake GitHub and GitLab that serve the git
 smart-HTTP protocol, and need Postgres; without `HYPERBEAM_TEST_DATABASE_URL` they are skipped.
+`scripts/test.sh` starts a throwaway `postgres:16` container on port 5441 and sets it for you; to use
+your own Postgres instead, set `HYPERBEAM_TEST_DATABASE_URL` to a server-level URL whose user may create
+databases. For running `cargo test` by hand, `eval "$(scripts/test.sh env)"` exports it.
 
 | Path | Contents |
 |---|---|
