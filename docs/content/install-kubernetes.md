@@ -87,10 +87,23 @@ Then, under **Settings → Harnesses**, set each harness profile’s image to th
 
 - The control plane, as one replica.
 - A single-instance Postgres, unless you set `database.url` to use your own.
-- A namespace for sandboxes, `hyperbeam-agents`, under the `restricted` Pod Security Standard. The control plane may create and delete pods and their token secrets there, and nothing else.
+- A namespace for sandboxes, `hyperbeam-agents`, under the `restricted` Pod Security Standard. The control plane may create and delete pods and their token secrets there, read the namespace’s events, and nothing else.
 - A NetworkPolicy that lets sandboxes reach only the control plane and cluster DNS. With `egress.enforce: true` (the default) everything else goes through the egress allowlist proxy.
 
 Each session gets a pod that runs as a non-root user with no service account token, no added capabilities, and resource limits (2 CPUs, 4 GiB of memory and a 10 GiB workspace by default). Idle sandboxes are torn down after 15 minutes.
+
+## See how the cluster is doing
+
+Admins have a **Cluster** page in the web app. It shows:
+
+- each node, whether it is ready, and anything it reports as wrong, such as disk or memory pressure;
+- every image sandboxes start from (the runner, each harness, each environment) and whether each node has pulled it;
+- each sandbox pod, the session it belongs to, and why it is stuck if it is: an image that can’t be pulled, a crash, no node with room for it;
+- what Kubernetes has reported about sandboxes in the last hour.
+
+To show nodes and their images, the chart lets the control plane list the cluster’s nodes, read-only. This is the one permission it holds outside the sandbox namespace. If you can’t create a ClusterRole, set `agents.readNodes=false`; the page then shows sandboxes and events only.
+
+A node reports only its 50 largest images. On a node that holds more, an image it does not list is shown as unknown, not as missing.
 
 ## Network isolation
 

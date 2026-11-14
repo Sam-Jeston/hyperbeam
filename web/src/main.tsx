@@ -1,4 +1,4 @@
-import { Activity, Bell, Bot, BookOpen, ChevronsUpDown, LayoutGrid, Loader2, LogOut, Menu as MenuIcon, Monitor, Moon, Plus, Settings, Sun, UserRound, Users } from "lucide-react";
+import { Activity, Bell, Bot, BookOpen, ChevronsUpDown, LayoutGrid, Loader2, LogOut, Menu as MenuIcon, Monitor, Moon, Plus, Server, Settings, Sun, UserRound, Users } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
@@ -17,6 +17,7 @@ import { AuthScreen } from "./pages/Auth";
 import { ActivityPage, AgentsPage } from "./pages/Agents";
 import { Board } from "./pages/Board";
 import { LinkPage } from "./pages/Chat";
+import { ClusterPage } from "./pages/Cluster";
 import { LibraryPage } from "./pages/Library";
 import { NotificationsPage } from "./pages/Notifications";
 import { SessionPage } from "./pages/Session";
@@ -36,6 +37,7 @@ interface NavItem {
 function useNav(): { section?: string; items: NavItem[] }[] {
   const liveCount = useStore((s) => Object.values(s.sessions).filter(isLive).length);
   const unread = useStore((s) => s.unread);
+  const isAdmin = useStore((s) => s.me?.role !== "member");
   return [
     {
       items: [
@@ -50,6 +52,8 @@ function useNav(): { section?: string; items: NavItem[] }[] {
       section: "Team",
       items: [
         { href: "/team", label: "People & permissions", icon: <Users />, match: (p) => p.startsWith("/team") },
+        // Admins only, as the API is.
+        ...(isAdmin ? [{ href: "/cluster", label: "Cluster", icon: <Server />, match: (p: string) => p.startsWith("/cluster") }] : []),
         { href: "/settings", label: "Settings", icon: <Settings />, match: (p) => p.startsWith("/settings") },
       ],
     },
@@ -191,6 +195,7 @@ function Shell() {
   else if (a === "notifications") page = <NotificationsPage />;
   else if (a === "library") page = <LibraryPage tab={b ?? "skills"} />;
   else if (a === "team") page = <TeamPage />;
+  else if (a === "cluster") page = <ClusterPage />;
   else if (a === "link" && b) page = <LinkPage key={b} code={b} />;
   else if (a === "settings") page = <SettingsPage tab={b ?? "integrations"} />;
   else page = <NotFound />;

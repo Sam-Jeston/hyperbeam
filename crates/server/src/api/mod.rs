@@ -2,6 +2,7 @@
 
 mod account;
 mod chat;
+mod cluster;
 mod connections;
 mod notifications;
 mod settings;
@@ -101,6 +102,7 @@ pub fn router() -> Router<App> {
         .route("/sessions/{id}/stop", post(work::stop_session))
         .route("/activity", get(work::list_activity))
         .route("/audit", get(work::list_audit))
+        .route("/cluster", get(cluster::get))
 }
 
 /// Public: what the login screen needs before anyone is signed in.

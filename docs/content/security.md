@@ -59,7 +59,7 @@ What this does not stop:
 
 ## The sandbox itself
 
-Each Kubernetes sandbox is a pod that runs as a non-root user, with no service account token and no added capabilities, under the `restricted` Pod Security Standard, with CPU, memory and disk limits. The control plane’s own permissions in the sandbox namespace are limited to creating and deleting pods and their token secrets.
+Each Kubernetes sandbox is a pod that runs as a non-root user, with no service account token and no added capabilities, under the `restricted` Pod Security Standard, with CPU, memory and disk limits. The control plane’s own permissions in the sandbox namespace are limited to creating and deleting pods and their token secrets, and reading events. Outside it, it may list the cluster’s nodes, for the [Cluster page](/install-kubernetes#see-how-the-cluster-is-doing), unless you turn that off.
 
 ## The audit log
 

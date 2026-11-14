@@ -56,6 +56,11 @@ agents:
   workspaceSize: 10Gi
   maxSessions: 20
   idleTimeoutSeconds: 900
+  # Let the control plane list the cluster's nodes (read-only), so the
+  # Cluster page can show their health and which images they have pulled.
+  # Turn off where you may not create a ClusterRole; the page then shows
+  # sandboxes and events only.
+  readNodes: true
 
 egress:
   # Route all sandbox traffic through Hyperbeam's allowlist proxy and block

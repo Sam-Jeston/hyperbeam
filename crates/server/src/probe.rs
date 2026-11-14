@@ -52,6 +52,11 @@ impl Probes {
         self.running.lock().unwrap().values().find(|p| p.token_hash == hash).cloned()
     }
 
+    /// The harness a running probe's sandbox is asking, by the sandbox's id.
+    pub fn harness_of(&self, id: Uuid) -> Option<Uuid> {
+        self.running.lock().unwrap().values().find(|p| p.id == id).map(|p| p.harness_id)
+    }
+
     /// Whether a probe of this harness is in flight, and the last failure.
     pub fn status(&self, harness_id: Uuid) -> (bool, Option<String>) {
         let running = self.running.lock().unwrap();

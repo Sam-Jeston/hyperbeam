@@ -3,7 +3,7 @@
 //! There is no isolation here. An agent can read anything the server's user
 //! can. Use it to try Hyperbeam on a laptop; use Kubernetes for anything shared.
 
-use super::{LaunchRequest, SandboxDriver};
+use super::{Inspection, LaunchRequest, SandboxDriver, SandboxInfo, SandboxState};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -96,5 +96,33 @@ impl SandboxDriver for ProcessDriver {
 
     async fn list(&self) -> Result<Vec<Uuid>> {
         Ok(self.children.lock().await.keys().copied().collect())
+    }
+
+    async fn inspect(&self) -> Inspection {
+        let mut children = self.children.lock().await;
+        let sandboxes = children
+            .iter_mut()
+            .map(|(id, child)| {
+                // A runner that has exited stays here until its session is torn down.
+                let exited = child.try_wait().ok().flatten();
+                SandboxInfo {
+                    id: Some(*id),
+                    name: child.id().map_or_else(|| "runner".to_string(), |pid| format!("runner (pid {pid})")),
+                    node: None,
+                    state: match exited {
+                        None => SandboxState::Running,
+                        Some(status) if status.success() => SandboxState::Finished,
+                        Some(_) => SandboxState::Failing,
+                    },
+                    reason: String::new(),
+                    message: exited.filter(|status| !status.success()).map(|status| format!("the runner exited: {status}")).unwrap_or_default(),
+                    image: String::new(),
+                    restarts: 0,
+                    created_at: None,
+                    containers: Vec::new(),
+                }
+            })
+            .collect();
+        Inspection { sandboxes, ..Default::default() }
     }
 }

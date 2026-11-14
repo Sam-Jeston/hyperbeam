@@ -364,3 +364,74 @@ export interface Workflow {
 
 export const LIVE: SessionStatus[] = ["pending", "starting", "running", "idle"];
 export const isLive = (s: Session) => LIVE.includes(s.status);
+
+// ------------------------------------------------------------------ cluster
+
+export interface ClusterNode {
+  name: string;
+  ready: boolean;
+  /** Not cordoned. */
+  schedulable: boolean;
+  roles: string[];
+  arch: string;
+  os: string;
+  kubelet: string;
+  runtime: string;
+  cpu: string;
+  memory_bytes: number | null;
+  /** Conditions that are not as they should be, in words. */
+  problems: string[];
+  created_at: string | null;
+  /** False when the node may hold more images than it reports. */
+  images_complete: boolean;
+}
+
+export interface ClusterImage {
+  image: string;
+  used_by: { kind: "runner" | "harness" | "environment"; name: string }[];
+  nodes: { node: string; state: "present" | "missing" | "unknown"; size_bytes: number | null }[];
+  /** Why a sandbox is failing to pull it right now. */
+  pull_error: string | null;
+}
+
+export interface ClusterSandbox {
+  id: string | null;
+  name: string;
+  node: string | null;
+  state: "starting" | "running" | "failing" | "finished" | "terminating";
+  reason: string;
+  message: string;
+  image: string;
+  restarts: number;
+  created_at: string | null;
+  owner:
+    | { kind: "session"; session_id: string; title: string; status: SessionStatus }
+    /** Asking a harness which models it offers. */
+    | { kind: "probe"; title: string }
+    | { kind: "orphan" };
+}
+
+export interface ClusterEvent {
+  ts: string | null;
+  warning: boolean;
+  reason: string;
+  object: string;
+  message: string;
+  count: number;
+}
+
+export interface Cluster {
+  driver: string;
+  checked_at: string;
+  namespace: string | null;
+  live_sessions: number;
+  max_sessions: number;
+  sandbox: { pull_policy: string; cpu_limit: string; memory_limit: string; workspace_size: string } | null;
+  nodes: ClusterNode[];
+  nodes_error: string | null;
+  images: ClusterImage[];
+  sandboxes: ClusterSandbox[];
+  sandboxes_error: string | null;
+  events: ClusterEvent[];
+  events_error: string | null;
+}
