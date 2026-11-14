@@ -167,4 +167,5 @@ kind delete cluster --name hyperbeam
 
 - [Install on Kubernetes](/install-kubernetes): the same chart on a shared cluster, with a registry and an ingress.
 - [Install on AWS](/install-aws): a Terraform module that runs it on one EC2 instance.
+- [Install on a Raspberry Pi](/install-raspberry-pi): k3s on a Pi, deployed with one script.
 - [Configuration](/configuration): every server setting, and the chart values that set them.
