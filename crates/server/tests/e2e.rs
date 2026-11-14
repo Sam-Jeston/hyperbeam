@@ -533,12 +533,23 @@ impl Harness {
         let discord = FakeDiscord::default();
         let discord_api = discord.start().await;
 
-        let bin_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
+        // Cargo has moved test executables around between versions
+        // (target/debug/deps, then target/debug/build/<pkg>/<hash>/out), so
+        // look upwards for the directory the binaries were built into.
+        let exe = std::env::current_exe().unwrap();
+        let bin_dir = exe
+            .ancestors()
+            .skip(1)
+            .find(|dir| dir.join("hyperbeam-runner").is_file() && dir.join("hyperbeam-test-agent").is_file())
+            .unwrap_or_else(|| {
+                panic!(
+                    "build the binaries first: cargo build -p hyperbeam-runner -p hyperbeam-test-agent \
+                     (looked upwards from {})",
+                    exe.display()
+                )
+            });
         let runner = bin_dir.join("hyperbeam-runner");
         let agent = bin_dir.join("hyperbeam-test-agent");
-        for bin in [&runner, &agent] {
-            assert!(bin.exists(), "build the binaries first: cargo build -p hyperbeam-runner -p hyperbeam-test-agent");
-        }
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
