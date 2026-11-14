@@ -698,7 +698,7 @@ async fn begin(app: &App, kind: Kind, platform: &dyn Platform, user: &User, mess
         }
     }
 
-    let registered: Vec<Repo> = sqlx::query_as("SELECT id, host, full_name, default_branch, description, created_at FROM repos ORDER BY full_name").fetch_all(&app.db).await?;
+    let registered: Vec<Repo> = sqlx::query_as("SELECT * FROM repos ORDER BY full_name").fetch_all(&app.db).await?;
     let mut repos = settings.as_ref().map(|s| s.repos.0.clone()).unwrap_or_default();
     for repo in &registered {
         if text::names_repo(&prompt, &repo.full_name) && !repos.contains(&repo.full_name) {

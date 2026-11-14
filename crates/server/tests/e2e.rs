@@ -665,7 +665,7 @@ async fn gitlab_projects_work_alongside_github_repositories() {
 
     // A project under nested groups can only be GitLab's; a pasted address says so too.
     let repo = owner.post("/repos", json!({ "full_name": format!("{gitlab_url}/{WIDGET}/-/issues") })).await;
-    assert_eq!(repo["repo"], json!({ "id": repo["repo"]["id"], "host": "gitlab", "full_name": WIDGET, "default_branch": "main", "description": "A widget", "created_at": repo["repo"]["created_at"] }));
+    assert_eq!(repo["repo"], json!({ "id": repo["repo"]["id"], "host": "gitlab", "full_name": WIDGET, "default_branch": "main", "description": "A widget", "environment_id": null, "setup_command": "", "created_at": repo["repo"]["created_at"] }));
     assert_eq!(owner.call(Method::POST, "/repos", Some(json!({ "full_name": WIDGET, "host": "github" }))).await.0, StatusCode::BAD_REQUEST);
     assert_eq!(owner.call(Method::POST, "/repos", Some(json!({ "full_name": WIDGET }))).await.0, StatusCode::CONFLICT);
     let listed = owner.get("/repos").await;
