@@ -23,15 +23,16 @@
 #   PI=user@host                SSH destination (required)
 #   PUBLIC_URL=https://...      Where people will reach the UI (required for the first install)
 #   HARNESSES="claude-code"     harness images to build on first `up`
-#   MAX_SESSIONS=3              concurrent sandboxes, set on first install (chart default is 20)
-#   MEMORY_LIMIT=3Gi            memory limit per sandbox, set on first install (chart default is 4Gi)
+#   MAX_SESSIONS=3              concurrent sandboxes (chart default is 20)
+#   MEMORY_LIMIT=3Gi            memory limit per sandbox (chart default is 4Gi)
+#                               Both are 3 and 3Gi on first install. Set either with `up` to change it later.
 set -euo pipefail
 
 PI=${PI:-}
 PUBLIC_URL=${PUBLIC_URL:-}
 HARNESSES=${HARNESSES:-claude-code}
-MAX_SESSIONS=${MAX_SESSIONS:-3}
-MEMORY_LIMIT=${MEMORY_LIMIT:-3Gi}
+MAX_SESSIONS=${MAX_SESSIONS:-}
+MEMORY_LIMIT=${MEMORY_LIMIT:-}
 
 NS=hyperbeam
 TAG=pi
@@ -156,8 +157,12 @@ ensure_release() {
   )
   if pi <<<"$HELM status hyperbeam -n $NS >/dev/null 2>&1"; then
     # The chart keeps the master key and Postgres password from the existing Secret.
-    log "Upgrading the Helm release (applies chart changes)"
-    pi "$SRC" "${images[@]}" <<EOF
+    # Sandbox limits stay as they were installed unless given again.
+    local limits=()
+    [[ -n $MAX_SESSIONS ]] && limits+=(--set "agents.maxSessions=$MAX_SESSIONS")
+    [[ -n $MEMORY_LIMIT ]] && limits+=(--set "agents.memoryLimit=$MEMORY_LIMIT")
+    log "Upgrading the Helm release (applies chart changes${limits[*]:+ and ${limits[*]//--set /}})"
+    pi "$SRC" "${images[@]}" "${limits[@]}" <<EOF
 chart=\$1; shift
 $HELM upgrade hyperbeam "\$chart/deploy/helm/hyperbeam" -n $NS --reset-then-reuse-values "\$@" >/dev/null
 EOF
@@ -165,7 +170,7 @@ EOF
     [[ -n $PUBLIC_URL ]] || die "set PUBLIC_URL for the first install, e.g. PUBLIC_URL=https://hyperbeam.example.com"
     log "Installing the Helm release (master key: ~/$KEY_FILE on the Pi; back it up)"
     pi "$SRC" "$KEY_FILE" "${images[@]}" \
-      --set "publicUrl=$PUBLIC_URL" --set "agents.maxSessions=$MAX_SESSIONS" --set "agents.memoryLimit=$MEMORY_LIMIT" <<EOF
+      --set "publicUrl=$PUBLIC_URL" --set "agents.maxSessions=${MAX_SESSIONS:-3}" --set "agents.memoryLimit=${MEMORY_LIMIT:-3Gi}" <<EOF
 chart=\$1; key=\$2; shift 2
 umask 077
 mkdir -p "\$(dirname "\$key")"

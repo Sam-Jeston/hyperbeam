@@ -44,6 +44,36 @@ impl ProcessDriver {
     }
 }
 
+impl ProcessDriver {
+    async fn sandboxes(&self) -> Vec<SandboxInfo> {
+        let mut children = self.children.lock().await;
+        children
+            .iter_mut()
+            .map(|(id, child)| {
+                // A runner that has exited stays here until its session is torn down.
+                let exited = child.try_wait().ok().flatten();
+                SandboxInfo {
+                    id: Some(*id),
+                    name: child.id().map_or_else(|| "runner".to_string(), |pid| format!("runner (pid {pid})")),
+                    node: None,
+                    state: match exited {
+                        None => SandboxState::Running,
+                        Some(status) if status.success() => SandboxState::Finished,
+                        Some(_) => SandboxState::Failing,
+                    },
+                    dead: exited.is_some(),
+                    reason: String::new(),
+                    message: exited.filter(|status| !status.success()).map(|status| format!("the runner exited: {status}")).unwrap_or_default(),
+                    image: String::new(),
+                    restarts: 0,
+                    created_at: None,
+                    containers: Vec::new(),
+                }
+            })
+            .collect()
+    }
+}
+
 #[async_trait]
 impl SandboxDriver for ProcessDriver {
     fn name(&self) -> &'static str {
@@ -98,31 +128,11 @@ impl SandboxDriver for ProcessDriver {
         Ok(self.children.lock().await.keys().copied().collect())
     }
 
+    async fn health(&self) -> Result<HashMap<Uuid, SandboxInfo>> {
+        Ok(self.sandboxes().await.into_iter().filter_map(|sandbox| Some((sandbox.id?, sandbox))).collect())
+    }
+
     async fn inspect(&self) -> Inspection {
-        let mut children = self.children.lock().await;
-        let sandboxes = children
-            .iter_mut()
-            .map(|(id, child)| {
-                // A runner that has exited stays here until its session is torn down.
-                let exited = child.try_wait().ok().flatten();
-                SandboxInfo {
-                    id: Some(*id),
-                    name: child.id().map_or_else(|| "runner".to_string(), |pid| format!("runner (pid {pid})")),
-                    node: None,
-                    state: match exited {
-                        None => SandboxState::Running,
-                        Some(status) if status.success() => SandboxState::Finished,
-                        Some(_) => SandboxState::Failing,
-                    },
-                    reason: String::new(),
-                    message: exited.filter(|status| !status.success()).map(|status| format!("the runner exited: {status}")).unwrap_or_default(),
-                    image: String::new(),
-                    restarts: 0,
-                    created_at: None,
-                    containers: Vec::new(),
-                }
-            })
-            .collect();
-        Inspection { sandboxes, ..Default::default() }
+        Inspection { sandboxes: self.sandboxes().await, ..Default::default() }
     }
 }

@@ -141,6 +141,11 @@ pub struct Config {
     #[arg(long, env = "HYPERBEAM_START_TIMEOUT_SECS", default_value_t = 600)]
     pub start_timeout_secs: u64,
 
+    /// A session whose sandbox was lost waits this long for a fresh one, and
+    /// twice as long the next time.
+    #[arg(long, env = "HYPERBEAM_RECOVERY_DELAY_SECS", default_value_t = 15)]
+    pub recovery_delay_secs: u64,
+
     /// Most sandboxes alive at once.
     #[arg(long, env = "HYPERBEAM_MAX_SESSIONS", default_value_t = 20)]
     pub max_sessions: usize,

@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;
 
 pub struct LaunchRequest {
@@ -35,6 +35,10 @@ pub trait SandboxDriver: Send + Sync {
     async fn destroy(&self, session_id: Uuid) -> Result<()>;
     /// Sessions that currently have a sandbox, for orphan cleanup.
     async fn list(&self) -> Result<Vec<Uuid>>;
+    /// How each sandbox is doing, by the session it belongs to. A session
+    /// that is missing here has no sandbox. Cheap enough to ask every few
+    /// seconds: this is how a sandbox that died is noticed.
+    async fn health(&self) -> Result<HashMap<Uuid, SandboxInfo>>;
     /// What can be seen of where sandboxes run, for the Cluster page. Never
     /// fails as a whole: each part that could not be read says why.
     async fn inspect(&self) -> Inspection;
@@ -133,6 +137,9 @@ pub struct SandboxInfo {
     pub name: String,
     pub node: Option<String>,
     pub state: SandboxState,
+    /// It has stopped for good and will not run again: killed, crashed,
+    /// evicted or exited. A sandbox that is merely stuck is not dead.
+    pub dead: bool,
     /// A short machine reason (`ImagePullBackOff`, `PodInitializing`), if any.
     pub reason: String,
     pub message: String,
@@ -140,6 +147,20 @@ pub struct SandboxInfo {
     pub restarts: i32,
     pub created_at: Option<DateTime<Utc>>,
     pub containers: Vec<ContainerInfo>,
+}
+
+impl SandboxInfo {
+    /// What is wrong with it, in words fit for a session's log.
+    pub fn problem(&self) -> String {
+        match (self.reason.as_str(), self.message.as_str()) {
+            ("OOMKilled", "") => "it ran out of memory".to_string(),
+            ("OOMKilled", message) => format!("it ran out of memory ({message})"),
+            ("", "") => "it stopped".to_string(),
+            (reason, "") => reason.to_string(),
+            ("" | "Error", message) => message.to_string(),
+            (reason, message) => format!("{reason}: {message}"),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

@@ -5,7 +5,7 @@ use crate::app::App;
 use crate::crypto;
 use crate::error::{ApiError, ApiResult};
 use crate::integrations::Host;
-use crate::sandbox::LaunchRequest;
+use crate::sandbox::{LaunchRequest, SandboxState};
 use crate::store::{self, Event, Harness, Question, Repo, Session, User};
 use anyhow::{Context, Result, anyhow};
 use hyperbeam_core::protocol::{HarnessSpec, RepoSpec, RunSpec, RunnerMsg, ServerMsg, SessionStatus, SkillSpec, event};
@@ -21,6 +21,15 @@ use uuid::Uuid;
 
 /// A runner that drops its connection gets this long to come back.
 const RECONNECT_GRACE: Duration = Duration::from_secs(200);
+/// A sandbox that cannot be found is believed gone once its session has been
+/// without a connection this long.
+const SETTLE: Duration = Duration::from_secs(10);
+/// A sandbox reported dead is believed once its runner has been gone this
+/// long: a runner that gave its reason for stopping is heard out first.
+const DEAD_SETTLE: Duration = Duration::from_secs(2);
+/// How many times in a row a session is given a fresh sandbox after losing
+/// one, before it is failed.
+const MAX_RECOVERIES: i32 = 2;
 const MAX_LIVE_CHILDREN: i64 = 8;
 /// Given in place of an environment's name to run in the harness image.
 pub const NO_ENVIRONMENT: &str = "none";
@@ -28,6 +37,8 @@ pub const NO_ENVIRONMENT: &str = "none";
 /// In-memory state for a session that owns a sandbox.
 struct Live {
     tx: Option<mpsc::UnboundedSender<ServerMsg>>,
+    /// The driver has been asked for the sandbox and said yes.
+    launched: bool,
     /// Distinguishes successive connections from the same runner.
     conn: u64,
     /// The harness has completed its handshake.
@@ -37,6 +48,16 @@ struct Live {
     /// When the session entered its current connection state.
     since: Instant,
     idle_since: Option<Instant>,
+}
+
+/// What the reaper has decided to do about a session.
+enum Reap {
+    /// Its sandbox died or cannot be reached: give it another.
+    Lost(String),
+    /// It cannot start, and another sandbox would not either.
+    Failed(String),
+    /// Nothing to do for a while: hibernate.
+    Idle,
 }
 
 #[derive(Default)]
@@ -616,11 +637,18 @@ impl App {
         if let Some(user_id) = user_id {
             self.read_notifications(user_id, None, Some(session.id)).await?;
         }
-        let status = SessionStatus::parse(&session.status).unwrap_or(SessionStatus::Failed);
-        if status.is_live() && self.live.contains(session.id) {
+        // Not the status the caller read a moment ago: a conductor is told of
+        // its workers from many tasks at once.
+        let status: Option<(String,)> = sqlx::query_as("SELECT status FROM sessions WHERE id = $1").bind(session.id).fetch_optional(&self.db).await?;
+        let status = status.and_then(|(status,)| SessionStatus::parse(&status)).unwrap_or(SessionStatus::Failed);
+        if status == SessionStatus::Pending {
+            // Waiting for a sandbox, which the reaper gives it. The prompt is queued.
+        } else if status.is_live() && self.live.contains(session.id) {
             self.dispatch(session.id).await;
         } else {
-            sqlx::query("UPDATE sessions SET status = 'pending', ended_at = NULL, error = NULL WHERE id = $1")
+            sqlx::query(
+                "UPDATE sessions SET status = 'pending', ended_at = NULL, error = NULL, recoveries = 0, launch_after = NULL WHERE id = $1",
+            )
                 .bind(session.id)
                 .execute(&self.db)
                 .await?;
@@ -736,7 +764,8 @@ impl App {
     // ---------------------------------------------------------------- launch
 
     /// Start a sandbox for a pending session, if there is capacity. Sessions
-    /// left pending are retried by the reaper.
+    /// left pending are retried by the reaper. An error here is one a fresh
+    /// sandbox would not cure.
     pub async fn try_launch(&self, session_id: Uuid) {
         if let Err(err) = self.launch(session_id).await {
             tracing::error!("launch of {session_id} failed: {err:#}");
@@ -756,7 +785,7 @@ impl App {
             }
             map.insert(
                 session_id,
-                Live { tx: None, conn: 0, ready: false, turn: None, since: Instant::now(), idle_since: None },
+                Live { tx: None, launched: false, conn: 0, ready: false, turn: None, since: Instant::now(), idle_since: None },
             );
         }
         // Claim the session; another task (or an end_session) may have raced.
@@ -798,7 +827,84 @@ impl App {
             server_url: self.cfg.internal_url.clone(),
             env: BTreeMap::new(),
         };
-        self.driver.launch(&request).await.context("could not start a sandbox")
+        match self.driver.launch(&request).await {
+            Ok(()) => {
+                self.live.with(session_id, |live| {
+                    live.launched = true;
+                    live.since = Instant::now();
+                });
+            }
+            // The cluster refusing a sandbox now may well grant one shortly.
+            Err(err) => self.sandbox_lost(session_id, &format!("could not start a sandbox: {err:#}")).await,
+        }
+        Ok(())
+    }
+
+    /// A session's sandbox died under it, or never came up. That is the
+    /// machine's doing rather than the agent's, so the session is put back in
+    /// the queue for a fresh sandbox, with whatever it was working on, and
+    /// only failed once that has not helped several times in a row.
+    async fn sandbox_lost(&self, session_id: Uuid, why: &str) {
+        // Whoever takes it out of the live map deals with it.
+        let Some(live) = self.live.map.lock().unwrap().remove(&session_id) else { return };
+        if let Some(tx) = live.tx {
+            tx.send(ServerMsg::Shutdown).ok();
+        }
+        tracing::warn!("session {session_id} lost its sandbox: {why}");
+
+        let queued: i64 = sqlx::query_as("SELECT count(*) FROM session_inputs WHERE session_id = $1 AND completed_at IS NULL")
+            .bind(session_id)
+            .fetch_one(&self.db)
+            .await
+            .map_or(1, |(n,): (i64,)| n);
+        if live.ready && live.turn.is_none() && queued == 0 {
+            // It was only waiting. It gets a sandbox again when there is work.
+            self.note(session_id, format!("The sandbox was lost while idle ({why}). Send a message to resume.")).await;
+            self.end_session(session_id, SessionStatus::Completed, None).await;
+            return;
+        }
+
+        let delay = self.cfg.recovery_delay_secs as f64;
+        let recovering: sqlx::Result<Option<(i32,)>> = sqlx::query_as(
+            "UPDATE sessions
+             SET status = 'pending', run_token_hash = NULL, recoveries = recoveries + 1,
+                 launch_after = now() + make_interval(secs => $3 * power(2, recoveries))
+             WHERE id = $1 AND status IN ('starting', 'running', 'idle') AND recoveries < $2
+             RETURNING recoveries",
+        )
+        .bind(session_id)
+        .bind(MAX_RECOVERIES)
+        .bind(delay)
+        .fetch_optional(&self.db)
+        .await;
+        let attempt = match recovering {
+            Ok(Some((attempt,))) => attempt,
+            Ok(None) => {
+                let error = format!("{why} (and {MAX_RECOVERIES} fresh sandboxes before it were lost too)");
+                self.end_session(session_id, SessionStatus::Failed, Some(&error)).await;
+                return;
+            }
+            Err(err) => {
+                tracing::error!("could not requeue {session_id}: {err}");
+                self.end_session(session_id, SessionStatus::Failed, Some(why)).await;
+                return;
+            }
+        };
+        // What it was working on was never finished: it is asked again.
+        if let Err(err) = sqlx::query("UPDATE session_inputs SET delivered_at = NULL WHERE session_id = $1 AND completed_at IS NULL")
+            .bind(session_id)
+            .execute(&self.db)
+            .await
+        {
+            tracing::error!("could not requeue the prompts of {session_id}: {err}");
+        }
+        if let Err(err) = self.driver.destroy(session_id).await {
+            tracing::warn!("could not destroy sandbox of {session_id}: {err:#}");
+        }
+        self.append_event(session_id, event::ERROR, json!({ "text": format!("The sandbox was lost: {why}") })).await.ok();
+        self.note(session_id, format!("Starting over in a fresh sandbox (attempt {attempt} of {MAX_RECOVERIES})")).await;
+        self.append_event(session_id, event::STATUS, json!({ "status": "pending" })).await.ok();
+        self.publish_session(session_id).await;
     }
 
     /// The harness credential a session launched by `user_id` runs with: the
@@ -1090,11 +1196,23 @@ impl App {
 
         if session.launches > 1 {
             let digest = self.transcript_digest(session.id, 8000).await?;
-            if !digest.is_empty() {
+            let (recoveries,): (i32,) = sqlx::query_as("SELECT recoveries FROM sessions WHERE id = $1").bind(session.id).fetch_one(&self.db).await?;
+            if recoveries > 0 {
+                p.push_str(
+                    "\n## Earlier in this session\nYour previous sandbox was lost without warning (killed, or its machine \
+                     failed); this is a fresh one. Work you pushed is on the branch above, anything you had not pushed is gone, \
+                     and you may have been part way through the request you are about to be given: look at what is already \
+                     there before doing it again. If you were running something heavy when it was lost, such as a large \
+                     build or test run, do it more gently this time.",
+                );
+            } else if !digest.is_empty() {
                 p.push_str(
                     "\n## Earlier in this session\nYour previous sandbox was torn down; this is a fresh one. \
-                     Work you pushed is on the branch above. The conversation so far:\n\n",
+                     Work you pushed is on the branch above.",
                 );
+            }
+            if !digest.is_empty() {
+                p.push_str(" The conversation so far:\n\n");
                 p.push_str(&digest);
             }
         }
@@ -1272,6 +1390,8 @@ impl App {
             live.turn = None;
             live.idle_since = Some(Instant::now());
         });
+        // A sandbox that carried a turn to its end is a sound one.
+        sqlx::query("UPDATE sessions SET recoveries = 0 WHERE id = $1 AND recoveries <> 0").bind(session_id).execute(&self.db).await?;
         self.set_status(session_id, SessionStatus::Idle, None).await?;
 
         if let Some(session) = store::session_by_id(&self.db, session_id).await? {
@@ -1484,6 +1604,7 @@ impl App {
                     *id,
                     Live {
                         tx: None,
+                        launched: true,
                         conn: 0,
                         ready: status != "starting",
                         turn: *turn,
@@ -1511,40 +1632,69 @@ impl App {
         let start_timeout = Duration::from_secs(self.cfg.start_timeout_secs);
         loop {
             tick.tick().await;
-            let mut actions: Vec<(Uuid, SessionStatus, Option<&'static str>)> = Vec::new();
+            // Ask after the sandboxes only while some session is without its runner.
+            let waiting = self.live.map.lock().unwrap().values().any(|live| live.tx.is_none() && live.launched);
+            let health = match waiting {
+                true => self.driver.health().await.map_err(|err| tracing::warn!("could not ask after the sandboxes: {err:#}")).ok(),
+                false => None,
+            };
+            let mut actions: Vec<(Uuid, Reap)> = Vec::new();
             {
                 let map = self.live.map.lock().unwrap();
                 for (id, live) in map.iter() {
                     if live.tx.is_none() {
-                        if live.conn == 0 && !live.ready && live.since.elapsed() > start_timeout {
-                            actions.push((*id, SessionStatus::Failed, Some("the sandbox did not start in time")));
-                        } else if (live.conn > 0 || live.ready) && live.since.elapsed() > RECONNECT_GRACE {
-                            actions.push((*id, SessionStatus::Failed, Some("lost contact with the sandbox")));
+                        let sandbox = health.as_ref().map(|health| health.get(id));
+                        let settled = live.launched && live.since.elapsed() > SETTLE;
+                        let starting = live.conn == 0 && !live.ready;
+                        match sandbox {
+                            // No need to wait out a timeout for a sandbox that cannot come back.
+                            Some(Some(sandbox)) if sandbox.dead && live.launched && live.since.elapsed() > DEAD_SETTLE => {
+                                actions.push((*id, Reap::Lost(format!("the sandbox died: {}", sandbox.problem()))));
+                            }
+                            Some(None) if settled => actions.push((*id, Reap::Lost("the sandbox is gone".to_string()))),
+                            // Stuck for a reason another sandbox would share, such as an image that cannot be pulled.
+                            Some(Some(sandbox)) if starting && live.since.elapsed() > start_timeout && sandbox.state == SandboxState::Failing => {
+                                actions.push((*id, Reap::Failed(format!("the sandbox did not start in time: {}", sandbox.problem()))));
+                            }
+                            _ if starting && live.since.elapsed() > start_timeout => {
+                                actions.push((*id, Reap::Lost("the sandbox did not start in time".to_string())));
+                            }
+                            _ if !starting && live.since.elapsed() > RECONNECT_GRACE => {
+                                actions.push((*id, Reap::Lost("lost contact with the sandbox".to_string())));
+                            }
+                            _ => {}
                         }
                     } else if live.ready && live.turn.is_none() && live.idle_since.is_some_and(|t| t.elapsed() > idle_timeout) {
-                        actions.push((*id, SessionStatus::Completed, None));
+                        actions.push((*id, Reap::Idle));
                     }
                 }
             }
-            for (id, status, error) in actions {
-                if status == SessionStatus::Completed {
-                    // Do not hibernate a session with work queued.
-                    let (queued,): (i64,) = sqlx::query_as("SELECT count(*) FROM session_inputs WHERE session_id = $1 AND delivered_at IS NULL")
-                        .bind(id)
-                        .fetch_one(&self.db)
-                        .await
-                        .unwrap_or((0,));
-                    if queued > 0 {
-                        self.dispatch(id).await;
-                        continue;
+            for (id, action) in actions {
+                match action {
+                    Reap::Lost(why) => self.sandbox_lost(id, &why).await,
+                    Reap::Failed(error) => self.end_session(id, SessionStatus::Failed, Some(&error)).await,
+                    Reap::Idle => {
+                        // Do not hibernate a session with work queued.
+                        let (queued,): (i64,) = sqlx::query_as("SELECT count(*) FROM session_inputs WHERE session_id = $1 AND delivered_at IS NULL")
+                            .bind(id)
+                            .fetch_one(&self.db)
+                            .await
+                            .unwrap_or((0,));
+                        if queued > 0 {
+                            self.dispatch(id).await;
+                            continue;
+                        }
+                        self.note(id, "Idle; sandbox torn down. Send a message to resume.").await;
+                        self.end_session(id, SessionStatus::Completed, None).await;
                     }
-                    self.note(id, "Idle; sandbox torn down. Send a message to resume.").await;
                 }
-                self.end_session(id, status, error).await;
             }
 
             if self.live.count() < self.cfg.max_sessions {
-                let pending: Vec<(Uuid,)> = sqlx::query_as("SELECT id FROM sessions WHERE status = 'pending' ORDER BY created_at LIMIT 20")
+                let pending: Vec<(Uuid,)> = sqlx::query_as(
+                    "SELECT id FROM sessions WHERE status = 'pending' AND (launch_after IS NULL OR launch_after <= now())
+                     ORDER BY created_at LIMIT 20",
+                )
                     .fetch_all(&self.db)
                     .await
                     .unwrap_or_default();

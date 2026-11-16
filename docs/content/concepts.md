@@ -33,6 +33,8 @@ Each live session runs in its own **sandbox**: a pod on Kubernetes, or a local p
 
 Sandboxes are torn down after 15 idle minutes. Work survives a teardown only if it was pushed; when you message the session again, it resumes in a fresh sandbox from the branch it pushed.
 
+A sandbox can also be lost while its agent is working: killed for using too much memory, or gone with the machine it ran on. The session is not failed for that. It waits a moment, starts over in a fresh sandbox and is given again the request it was working on. Its log says what happened to the sandbox. Only when two fresh sandboxes in a row are lost as well does the session fail.
+
 ## Harnesses
 
 A **harness** is the coding agent that runs inside the sandbox: Claude Code, Codex, Gemini CLI, OpenCode, or any agent that speaks the Agent Client Protocol (ACP) on stdio. A harness profile says which container image to use, how to start the agent, what credential it takes, which models it offers and which hosts it may reach. See [Harnesses and models](/harnesses).

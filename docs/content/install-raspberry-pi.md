@@ -104,12 +104,13 @@ The script:
 
 To build other agents too, name them: `HARNESSES="claude-code codex" scripts/pi.sh up`.
 
-The script sets two limits that suit an 8 GB machine: 3 sandboxes at once (`MAX_SESSIONS`), each with at most 3 GiB of memory (`MEMORY_LIMIT`). Other sessions wait in a queue. Set either variable on the first `up` to choose differently. To change them later, on the Pi:
+The script sets two limits that suit an 8 GB machine: 3 sandboxes at once (`MAX_SESSIONS`), each with at most 3 GiB of memory (`MEMORY_LIMIT`). Other sessions wait in a queue. Set either variable on `up` to choose differently, on the first install or later:
 
 ```bash
-sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade hyperbeam ~/hyperbeam-src/deploy/helm/hyperbeam \
-  --namespace hyperbeam --reset-then-reuse-values --set agents.maxSessions=2
+PI=pi@raspberrypi.local MAX_SESSIONS=2 MEMORY_LIMIT=4Gi scripts/pi.sh up
 ```
+
+The limit is a ceiling for each sandbox, not memory set aside for it, so the limits may add up to more than the Pi has.
 
 ## 5. Make it reachable
 

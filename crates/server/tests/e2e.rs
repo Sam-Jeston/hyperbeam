@@ -563,6 +563,8 @@ impl Harness {
             "--internal-url", &base,
             "--public-url", &base,
             "--sandbox-driver", "process",
+            // A lost sandbox is replaced at once.
+            "--recovery-delay-secs", "0",
             "--runner-bin", runner.to_str().unwrap(),
             "--workspace-root", tmp.join("sandboxes").to_str().unwrap(),
             "--github-api-url", &format!("http://{gh_addr}/api"),
@@ -2181,4 +2183,112 @@ async fn repositories_choose_an_environment_and_run_their_setup() {
     owner.ok(Method::DELETE, &format!("/environments/{rust_id}"), None).await;
     assert_eq!(owner.get("/repos").await["repos"][0]["environment_id"], Value::Null);
     assert_eq!(owner.session(id).await["environment_id"], Value::Null);
+}
+
+impl Client<'_> {
+    /// Kill a session's sandbox outright, as running out of memory would.
+    async fn kill_sandbox(&self, id: &str) {
+        let cluster = self.get("/cluster").await;
+        let sandbox = cluster["sandboxes"]
+            .as_array()
+            .and_then(|sandboxes| sandboxes.iter().find(|sandbox| sandbox["id"] == id))
+            .unwrap_or_else(|| panic!("session {id} has no sandbox: {cluster}"));
+        let name = sandbox["name"].as_str().unwrap();
+        let pid = name.trim_start_matches("runner (pid ").trim_end_matches(')');
+        assert!(pid.parse::<u32>().is_ok(), "{name}");
+        assert!(std::process::Command::new("kill").args(["-9", pid]).status().unwrap().success());
+    }
+
+    /// Wait until the agent has said `needle` `times` times.
+    async fn wait_said(&self, id: &str, needle: &str, times: usize) -> Vec<Value> {
+        for _ in 0..400 {
+            let events = self.events(id).await;
+            if events.iter().filter(|e| e["kind"] == "agent_message" && e["data"]["text"].as_str().is_some_and(|t| t.contains(needle))).count() >= times {
+                return events;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("session {id} did not say {needle:?} {times} time(s): {:#?}", self.events(id).await);
+    }
+
+    async fn wait_status(&self, id: &str, status: &str) -> Value {
+        for _ in 0..400 {
+            let session = self.session(id).await;
+            if session["status"] == status {
+                return session;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("session {id} did not become {status}: {:#?}", self.events(id).await);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_that_loses_its_sandbox_is_given_another() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+
+    // A conductor's sandbox is killed in the middle of its turn. It starts
+    // over in a fresh one, with the prompt it was working on, and its worker
+    // still reports to it.
+    // The turn stalls the first time only, where the sandbox is killed. (The
+    // process driver's agent outlives its runner, so it must not get as far
+    // as delegating before its token is withdrawn.)
+    let marker = h._tmp.join("stalled-once");
+    let prompt = format!(
+        r#"Ship the thing.
+!sh [ -e {marker} ] || {{ touch {marker}; sleep 30; }}
+!mcp hyperbeam_spawn_agent {{"title": "Build part A", "prompt": "!say Part A is built."}}
+!say Delegated part A."#,
+        marker = marker.display()
+    );
+    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "scripted", "role": "conductor" })).await;
+    let id = created["session"]["id"].as_str().unwrap();
+    for _ in 0..200 {
+        if marker.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(marker.exists(), "the turn never started");
+    owner.kill_sandbox(id).await;
+
+    let events = owner.wait_turns(id, 2).await;
+    assert!(text_of(&events, "error").contains("The sandbox was lost: the sandbox died"), "{events:#?}");
+    assert!(text_of(&events, "system").contains("Starting over in a fresh sandbox (attempt 1 of 2)"));
+    assert!(told(&events).contains("Part A is built."), "{events:#?}");
+    let detail = owner.get(&format!("/sessions/{id}")).await;
+    assert_eq!(detail["session"]["launches"], 2);
+    assert_eq!(detail["children"].as_array().unwrap().len(), 1, "the lost turn delegated nothing");
+    // Nobody was told it failed, because it did not.
+    let inbox = owner.wait_notifications(1).await;
+    assert!(inbox.iter().all(|n| n["kind"] == "finished"), "{inbox:?}");
+
+    // A sandbox lost while the agent had nothing to do is not replaced until
+    // there is something to do.
+    owner.kill_sandbox(id).await;
+    owner.wait_status(id, "completed").await;
+    assert!(text_of(&owner.events(id).await, "system").contains("The sandbox was lost while idle"));
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": "!say Back again." })).await;
+    let events = owner.wait_turns(id, 3).await;
+    assert!(text_of(&events, "agent_message").contains("Back again."));
+
+    // Losing one sandbox after another is not something to keep trying.
+    let created = owner.post("/sessions", json!({ "prompt": "!say Building.\n!sleep 60", "harness": "scripted" })).await;
+    let doomed = created["session"]["id"].as_str().unwrap();
+    for attempt in 1..=3 {
+        owner.wait_said(doomed, "Building.", attempt).await;
+        owner.kill_sandbox(doomed).await;
+    }
+    let session = owner.wait_status(doomed, "failed").await;
+    let error = session["error"].as_str().unwrap();
+    assert!(error.starts_with("the sandbox died") && error.contains("2 fresh sandboxes before it were lost too"), "{error}");
+    // Its owner is told, a moment after the sandbox is cleared away.
+    for _ in 0..100 {
+        if owner.wait_notifications(2).await.iter().any(|n| n["kind"] == "failed" && n["session_id"] == doomed) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("nobody was told that the session failed");
 }

@@ -26,6 +26,7 @@ Exactly one of the three master key settings is required. See [Credentials](/cre
 | `HYPERBEAM_SANDBOX_DRIVER` | `process` | `process` runs agents as local processes with no isolation, for development. `kubernetes` runs one pod per session. |
 | `HYPERBEAM_IDLE_TIMEOUT_SECS` | `900` | Tear down an idle session’s sandbox after this long. The session can still be resumed. |
 | `HYPERBEAM_START_TIMEOUT_SECS` | `600` | Give up on a sandbox that has not connected within this long. |
+| `HYPERBEAM_RECOVERY_DELAY_SECS` | `15` | A session whose sandbox was lost waits this long for a fresh one, and twice as long the second time. |
 | `HYPERBEAM_MAX_SESSIONS` | `20` | Most sandboxes running at once. Others queue. |
 | `HYPERBEAM_RUNNER_BIN` | next to the server | Process driver: path to `hyperbeam-runner`. |
 | `HYPERBEAM_WORKSPACE_ROOT` | `hyperbeam-sandboxes` in the system temp directory | Process driver: where workspaces are created. |

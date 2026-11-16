@@ -20,6 +20,7 @@ use kube::api::{Api, DeleteParams, ListParams, PostParams};
 use kube::{Client, ResourceExt};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 const SESSION_LABEL: &str = "hyperbeam.dev/session";
@@ -42,6 +43,9 @@ const HOME_SEED_BYTES: u64 = 1 << 30;
 const NODE_IMAGE_REPORT_LIMIT: usize = 50;
 /// A pod waits briefly for its token Secret; past this it is stuck.
 const CONFIG_GRACE_SECS: i64 = 60;
+/// How long a new pod waits for the one it replaces to be gone. Longer than
+/// the grace period that pod is deleted with.
+const REPLACE_WAIT_SECS: u32 = 30;
 /// The most recent events kept for the Cluster page.
 const EVENT_LIMIT: usize = 100;
 
@@ -112,7 +116,10 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
             "command": command,
             "volumeMounts": [runner_bin, { "name": volume, "mountPath": to }],
             "securityContext": hardened,
-            "resources": { "requests": { "cpu": "100m", "memory": "64Mi" }, "limits": { "cpu": "1", "memory": "256Mi" } },
+            // Copying is all page cache, and on a slow or busy disk the pages
+            // wait to be written out while they count against the limit. A
+            // small limit gets the copy killed, so it has the sandbox's own.
+            "resources": { "requests": { "cpu": "100m", "memory": "64Mi" }, "limits": { "cpu": "1", "memory": settings.memory_limit } },
         })
     };
 
@@ -123,7 +130,7 @@ pub fn pod_manifest(settings: &PodSettings, request: &LaunchRequest) -> serde_js
         "command": ["/hyperbeam-runner", "install", RUNNER_PATH],
         "volumeMounts": [{ "name": "hyperbeam-bin", "mountPath": "/hyperbeam/bin" }],
         "securityContext": hardened,
-        "resources": { "limits": { "cpu": "200m", "memory": "64Mi" } },
+        "resources": { "requests": { "cpu": "100m", "memory": "64Mi" }, "limits": { "cpu": "200m", "memory": "256Mi" } },
     })];
     let mut mounts = vec![
         runner_bin.clone(),
@@ -361,11 +368,16 @@ pub fn sandbox_info(pod: &Pod, now: DateTime<Utc>) -> SandboxInfo {
         }
     };
 
+    // Nothing in an agent pod is ever restarted, so one container that failed
+    // is the end of the pod, a moment before its phase says so.
+    let dead = matches!(phase, "Failed" | "Succeeded") || containers.iter().any(|c| c.state == "terminated" && c.exit_code != Some(0));
+
     SandboxInfo {
         id: pod.labels().get(SESSION_LABEL).and_then(|id| id.parse().ok()),
         name: pod.name_any(),
         node: spec.and_then(|s| s.node_name.clone()),
         state,
+        dead,
         reason,
         message,
         image: spec.and_then(|s| s.containers.first()).and_then(|c| c.image.clone()).unwrap_or_default(),
@@ -518,7 +530,18 @@ impl SandboxDriver for KubernetesDriver {
         let name = pod_name(request.session_id);
 
         let pod: Pod = serde_json::from_value(pod_manifest(&self.settings, request))?;
-        let created = pods.create(&PostParams::default(), &pod).await.context("could not create the agent pod")?;
+        let mut waited = 0;
+        let created = loop {
+            match pods.create(&PostParams::default(), &pod).await {
+                // The session's previous pod, deleted just above, takes a
+                // moment to go, and until then its name is taken.
+                Err(kube::Error::Api(err)) if err.code == 409 && waited < REPLACE_WAIT_SECS => {
+                    waited += 1;
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+                other => break other.context("could not create the agent pod")?,
+            }
+        };
 
         // The token lives in a Secret owned by the pod, so deleting the pod
         // garbage-collects it. The pod waits for the Secret to appear.
@@ -572,6 +595,20 @@ impl SandboxDriver for KubernetesDriver {
             .iter()
             .filter(|pod| pod.metadata.deletion_timestamp.is_none())
             .filter_map(|pod| pod.labels().get(SESSION_LABEL)?.parse().ok())
+            .collect())
+    }
+
+    async fn health(&self) -> Result<HashMap<Uuid, SandboxInfo>> {
+        let pods: Api<Pod> = Api::namespaced(self.client.clone(), &self.namespace);
+        let list = pods.list(&ListParams::default().labels("hyperbeam.dev/role=agent")).await?;
+        let now = Utc::now();
+        Ok(list
+            .items
+            .iter()
+            // A pod being deleted is no longer anybody's sandbox.
+            .filter(|pod| pod.metadata.deletion_timestamp.is_none())
+            .map(|pod| sandbox_info(pod, now))
+            .filter_map(|sandbox| Some((sandbox.id?, sandbox)))
             .collect())
     }
 
@@ -793,6 +830,54 @@ mod tests {
         });
         let info = sandbox_info(&pod(unschedulable), at(5));
         assert_eq!((info.state, info.reason.as_str()), (SandboxState::Failing, "Unschedulable"));
+    }
+
+    #[test]
+    fn a_sandbox_whose_container_was_killed_is_dead() {
+        // An init step killed for memory: the pod will never start.
+        let killed = sandbox_info(
+            &pod(json!({
+                "phase": "Pending",
+                "initContainerStatuses": [
+                    { "name": "runner", "image": "runner:1", "imageID": "", "ready": true, "restartCount": 0,
+                      "state": { "terminated": { "exitCode": 0, "reason": "Completed" } } },
+                    { "name": "home", "image": "harness:1", "imageID": "", "ready": false, "restartCount": 0,
+                      "state": { "terminated": { "exitCode": 137, "reason": "OOMKilled" } } },
+                ],
+            })),
+            at(5),
+        );
+        assert!(killed.dead);
+        assert_eq!(killed.state, SandboxState::Failing);
+        assert_eq!(killed.problem(), "it ran out of memory (home: exited with code 137)");
+
+        let evicted = sandbox_info(&pod(json!({ "phase": "Failed", "reason": "Evicted", "message": "The node was low on resource: memory." })), at(5));
+        assert!(evicted.dead);
+        assert_eq!(evicted.problem(), "Evicted: The node was low on resource: memory.");
+
+        // Stuck is not dead: the image may yet arrive.
+        let stuck = sandbox_info(
+            &pod(json!({
+                "phase": "Pending",
+                "containerStatuses": [
+                    { "name": "agent", "image": "harness:1", "imageID": "", "ready": false, "restartCount": 0,
+                      "state": { "waiting": { "reason": "ImagePullBackOff", "message": "Back-off pulling image" } } },
+                ],
+            })),
+            at(5),
+        );
+        assert!(!stuck.dead);
+        assert_eq!(stuck.problem(), "ImagePullBackOff: agent: Back-off pulling image");
+    }
+
+    #[test]
+    fn copying_steps_may_use_the_memory_the_sandbox_may() {
+        let manifest = pod_manifest(&settings(), &request("rust:1", Some("harness:1")));
+        let pod: Pod = serde_json::from_value(manifest).unwrap();
+        for step in pod.spec.unwrap().init_containers.unwrap().iter().filter(|c| c.name != "runner") {
+            let limits = step.resources.as_ref().unwrap().limits.as_ref().unwrap();
+            assert_eq!(limits["memory"].0, "4Gi", "{}", step.name);
+        }
     }
 
     #[test]
