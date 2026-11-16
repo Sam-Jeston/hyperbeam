@@ -108,6 +108,25 @@ pub fn offered_models(agent: &Value) -> Vec<store::ModelChoice> {
         .collect()
 }
 
+/// Whether a harness command launches OpenCode (the builtin profile or a copy of it).
+fn is_opencode(command: &[String]) -> bool {
+    command.first().is_some_and(|bin| bin.rsplit('/').next() == Some("opencode"))
+}
+
+/// Pin OpenCode's `small_model` (used for titles, summaries and other background
+/// calls) to the session's model, so it never falls back to a provider default
+/// the user didn't pick. Merges into any `OPENCODE_CONFIG_CONTENT` the profile sets.
+fn opencode_small_model(env: &mut BTreeMap<String, String>, model: &str) {
+    const VAR: &str = "OPENCODE_CONFIG_CONTENT";
+    let mut config = env
+        .get(VAR)
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    config["small_model"] = json!(model);
+    env.insert(VAR.to_string(), config.to_string());
+}
+
 fn slug(text: &str) -> String {
     let mut out = String::new();
     for c in text.chars() {
@@ -748,6 +767,11 @@ impl App {
         let model = session.model.clone().or_else(|| harness.default_model.clone()).filter(|m| !m.is_empty());
         if let (Some(model), Some(var)) = (&model, harness.model_env.as_deref().filter(|v| !v.is_empty())) {
             env.insert(var.to_string(), model.clone());
+        }
+        if let Some(model) = &model
+            && is_opencode(&harness.command.0)
+        {
+            opencode_small_model(&mut env, model);
         }
         self.proxy_env(token, &mut env);
 
@@ -1392,6 +1416,22 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opencode_small_model_follows_session_model() {
+        assert!(is_opencode(&["opencode".into(), "acp".into()]));
+        assert!(is_opencode(&["/usr/local/bin/opencode".into()]));
+        assert!(!is_opencode(&["gemini".into(), "--acp".into()]));
+
+        let mut env = BTreeMap::new();
+        opencode_small_model(&mut env, "openrouter/deepseek/deepseek-chat");
+        assert_eq!(env["OPENCODE_CONFIG_CONTENT"], r#"{"small_model":"openrouter/deepseek/deepseek-chat"}"#);
+
+        let mut env = BTreeMap::from([("OPENCODE_CONFIG_CONTENT".to_string(), r#"{"share":"disabled","small_model":"x"}"#.to_string())]);
+        opencode_small_model(&mut env, "anthropic/claude-sonnet-5-5");
+        let merged: Value = serde_json::from_str(&env["OPENCODE_CONFIG_CONTENT"]).unwrap();
+        assert_eq!(merged, json!({ "share": "disabled", "small_model": "anthropic/claude-sonnet-5-5" }));
+    }
 
     #[test]
     fn slugs_and_clips() {
