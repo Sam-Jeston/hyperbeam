@@ -8,7 +8,8 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Tooltip } from "../components/ui/menu";
 import { Badge, Notice } from "../components/ui/surface";
-import type { Session, SessionStatus, User } from "./api";
+import { type Session, type Standing, standing, type User } from "./api";
+import { useStore } from "./store";
 import { cn } from "./utils";
 
 // ------------------------------------------------------------------ routing
@@ -203,31 +204,34 @@ export function AvatarStack({ users, size = 20, max = 3 }: { users: (User | unde
   );
 }
 
-export const STATUS_LABEL: Record<SessionStatus, string> = {
+export const STATUS_LABEL: Record<Standing, string> = {
   pending: "Queued",
   starting: "Starting",
   running: "Working",
   idle: "Waiting for input",
+  delegating: "Waiting on its agents",
   completed: "Asleep",
   failed: "Failed",
   cancelled: "Stopped",
 };
 
-const STATUS_HELP: Record<SessionStatus, string> = {
+const STATUS_HELP: Record<Standing, string> = {
   pending: "Waiting for a free sandbox.",
   starting: "Preparing its sandbox.",
   running: "The agent is working.",
   idle: "The agent finished its turn and is waiting for a reply.",
+  delegating: "Agents it started are still working. It picks up again when they report back.",
   completed: "Its sandbox has shut down. Send a message to wake it in a fresh one.",
   failed: "The session stopped because of an error.",
   cancelled: "Someone stopped this agent.",
 };
 
-const STATUS_TONE: Record<SessionStatus, "run" | "wait" | "idle" | "fail" | "neutral"> = {
+const STATUS_TONE: Record<Standing, "run" | "wait" | "idle" | "fail" | "neutral"> = {
   pending: "wait",
   starting: "wait",
   running: "run",
   idle: "idle",
+  delegating: "run",
   completed: "neutral",
   failed: "fail",
   cancelled: "neutral",
@@ -235,7 +239,7 @@ const STATUS_TONE: Record<SessionStatus, "run" | "wait" | "idle" | "fail" | "neu
 
 const DOT_BG = { run: "bg-run", wait: "bg-wait", idle: "bg-idle", fail: "bg-fail", neutral: "bg-faint" };
 
-export function StatusDot({ status, className }: { status: SessionStatus; className?: string }) {
+export function StatusDot({ status, className }: { status: Standing; className?: string }) {
   const tone = STATUS_TONE[status];
   return (
     <span
@@ -247,8 +251,9 @@ export function StatusDot({ status, className }: { status: SessionStatus; classN
   );
 }
 
-export function StatusBadge({ session }: { session: Pick<Session, "status" | "question"> }) {
-  const tone = STATUS_TONE[session.status];
+export function StatusBadge({ session }: { session: Pick<Session, "id" | "status" | "question"> }) {
+  const status = standing(session, useStore((s) => s.sessions));
+  const tone = STATUS_TONE[status];
   // A question outranks the lifecycle state: it is what the agent needs next,
   // whether it is still working, waiting, or asleep.
   if (session.question) {
@@ -263,10 +268,10 @@ export function StatusBadge({ session }: { session: Pick<Session, "status" | "qu
     );
   }
   return (
-    <Tooltip content={STATUS_HELP[session.status]}>
+    <Tooltip content={STATUS_HELP[status]}>
       <Badge tone={tone}>
-        <span className={cn("size-1.5 rounded-full", DOT_BG[tone], session.status === "running" && "animate-pulse-ring")} />
-        {STATUS_LABEL[session.status]}
+        <span className={cn("size-1.5 rounded-full", DOT_BG[tone], status === "running" && "animate-pulse-ring")} />
+        {STATUS_LABEL[status]}
       </Badge>
     </Tooltip>
   );

@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { Button } from "../components/ui/button";
 import { Tooltip } from "../components/ui/menu";
 import { Badge, Card, EmptyState, Panel } from "../components/ui/surface";
-import { type Activity, isLive, type Session, type Workstream, type WorkstreamStatus } from "../lib/api";
+import { type Activity, isLive, type Session, standing, type Workstream, type WorkstreamStatus } from "../lib/api";
 import { useStore } from "../lib/store";
 import { A, Avatar, AvatarStack, dayLabel, openComposer, Page, PageHeader, SectionTitle, SmartLink, StatusDot, Time, useDocumentTitle, useTick } from "../lib/ui";
 import { cn } from "../lib/utils";
@@ -104,7 +104,8 @@ export function Board() {
 
 function WorkstreamCard({ workstream, sessions }: { workstream: Workstream; sessions: Session[] }) {
   const users = useStore((s) => s.users);
-  const live = sessions.filter(isLive);
+  const all = useStore((s) => s.sessions);
+  const live = sessions.filter(isLive).map((s) => ({ ...s, status: standing(s, all) }));
   const people = [...new Set([workstream.created_by, ...sessions.map((s) => s.created_by)])];
   const prs = workstream.links.filter((l) => l.kind === "pull_request");
   const needsYou = live.some((s) => s.status === "idle");
@@ -125,7 +126,7 @@ function WorkstreamCard({ workstream, sessions }: { workstream: Workstream; sess
                   {s.status !== "idle" && (
                     <>
                       {s.title !== workstream.title && " · "}
-                      {s.status === "running" ? s.headline || "Working" : "Starting"}
+                      {s.status === "running" ? s.headline || "Working" : s.status === "delegating" ? "Waiting on its agents" : "Starting"}
                     </>
                   )}
                   {s.status === "idle" && s.title === workstream.title && "Waiting for a reply"}
@@ -154,6 +155,7 @@ const plain = (line: string) => line.replace(/\*\*|`/g, "").replace(/^#+\s*/, ""
 
 export function AgentRow({ session, child }: { session: Session; child?: boolean }) {
   const users = useStore((s) => s.users);
+  const status = standing(session, useStore((s) => s.sessions));
   const line =
     session.question ? `Asks: ${session.question.text}` :
     session.status === "running" ? session.headline :
@@ -165,7 +167,7 @@ export function AgentRow({ session, child }: { session: Session; child?: boolean
       href={`/s/${session.id}`}
       className={cn("flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-surface-2/70 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring", child && "pl-10")}
     >
-      <StatusDot status={session.status} />
+      <StatusDot status={status} />
       <div className="grid min-w-0 flex-1 gap-0.5">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-[13.5px] font-medium">{session.title}</span>

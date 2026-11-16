@@ -44,7 +44,7 @@ Use the Tailwind names below, never hex values or Tailwind's built-in palette.
 | `run` / `wait` / `idle` / `fail` | session state, and only that (plus success/warning/error notices) |
 
 Session state always maps the same way: running → `run`, queued/starting → `wait`, waiting for input →
-`idle`, failed → `fail`, asleep/stopped → `faint`. Use `<StatusDot>` and `<StatusBadge>`, not hand-made dots.
+`idle`, waiting on its own agents → `run` (without the pulse), failed → `fail`, asleep/stopped → `faint`. Use `<StatusDot>` and `<StatusBadge>`, not hand-made dots.
 
 ## Type
 

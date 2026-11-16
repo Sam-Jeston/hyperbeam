@@ -1413,8 +1413,13 @@ impl App {
             .await;
             // The owner is told once the agent is really waiting on them: not
             // when they interrupted it themselves, not when its open question
-            // already told them, and not when its next prompt is queued.
-            if stop_reason != "cancelled" && session.question.is_none() && !self.reports_to_conductor(&session).await {
+            // already told them, not when its next prompt is queued, and not
+            // when workers it started are still to report back.
+            if stop_reason != "cancelled"
+                && session.question.is_none()
+                && !self.reports_to_conductor(&session).await
+                && !self.waiting_on_workers(session_id).await
+            {
                 let (queued,): (i64,) = sqlx::query_as("SELECT count(*) FROM session_inputs WHERE session_id = $1 AND delivered_at IS NULL")
                     .bind(session_id)
                     .fetch_one(&self.db)

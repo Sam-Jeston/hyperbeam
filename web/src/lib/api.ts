@@ -426,6 +426,22 @@ export interface Workflow {
 export const LIVE: SessionStatus[] = ["pending", "starting", "running", "idle"];
 export const isLive = (s: Session) => LIVE.includes(s.status);
 
+/** How a session stands: its status, or `delegating` when it ended its turn to wait on workers it started. */
+export type Standing = SessionStatus | "delegating";
+
+/**
+ * A session that is idle while workers it started are still at work is not
+ * waiting for a person: each worker's report prompts it again.
+ */
+export function standing(session: Pick<Session, "id" | "status">, sessions: Record<string, Session>): Standing {
+  if (session.status !== "idle") return session.status;
+  for (const id in sessions) {
+    const s = sessions[id];
+    if (s.parent_id === session.id && (s.status === "pending" || s.status === "starting" || s.status === "running")) return "delegating";
+  }
+  return "idle";
+}
+
 // ------------------------------------------------------------------ cluster
 
 export interface ClusterNode {

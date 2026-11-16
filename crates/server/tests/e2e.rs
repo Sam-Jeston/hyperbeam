@@ -867,8 +867,11 @@ async fn conductor_delegates_and_hears_back() {
     assert_eq!(child["summary"], "Part A is built.");
 
     // The owner hears from the conductor, never from the worker under it.
+    // The conductor's first turn ended while its worker was still at work:
+    // it was waiting on the worker, not on its owner, so that turn was quiet.
     let inbox = owner.wait_notifications(1).await;
     assert!(inbox.iter().all(|n| n["session_id"] == id), "{inbox:?}");
+    assert_eq!(inbox.len(), 1, "{inbox:?}");
 
     // A worker cannot manage agents.
     let child_id = child["id"].as_str().unwrap();

@@ -21,6 +21,7 @@ Each agent you start is a **session**: one conversation with one harness, in one
 | Starting | Its sandbox is being prepared. |
 | Working | The agent is working on its turn. |
 | Waiting for input | The agent finished its turn and is waiting for a reply. |
+| Waiting on its agents | A conductor finished its turn while agents it started are still working. It picks up again when they report back, and needs nothing from you. |
 | Asleep | Its sandbox shut down after being idle. A message wakes it in a fresh one. |
 | Failed | The session stopped because of an error. |
 | Stopped | Someone stopped it. |

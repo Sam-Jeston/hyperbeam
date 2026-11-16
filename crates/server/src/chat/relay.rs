@@ -73,7 +73,7 @@ async fn sync(app: &App, session_id: Uuid) -> Result<()> {
         let Some(platform) = app.chat.platform(kind) else { continue };
         // The status first, so a new thread opens with it. It is edited only
         // when what it says changes.
-        let status = status_message(app, &session);
+        let status = status_message(app, &session, app.waiting_on_workers(session.id).await);
         let shown = digest(&status);
         if thread.status_shown.as_deref() != Some(shown.as_str()) {
             let place = thread.place();
@@ -178,12 +178,15 @@ async fn owner_mention(app: &App, kind: Kind, owner: Uuid) -> Result<String> {
 }
 
 /// The one message that says where the session stands.
-pub fn status_message(app: &App, session: &Session) -> Outgoing {
+///
+/// `delegating` is whether workers the session started are still at work.
+pub fn status_message(app: &App, session: &Session, delegating: bool) -> Outgoing {
     let status = SessionStatus::parse(&session.status).unwrap_or(SessionStatus::Failed);
     let line = match status {
         _ if session.question.is_some() && status != SessionStatus::Running => "Has a question for you.".to_string(),
         SessionStatus::Pending | SessionStatus::Starting => "Starting…".to_string(),
         SessionStatus::Running => "Working…".to_string(),
+        SessionStatus::Idle if delegating => "Waiting on its agents…".to_string(),
         SessionStatus::Idle => "Waiting for your reply.".to_string(),
         SessionStatus::Completed => "Asleep. Reply here to wake it.".to_string(),
         SessionStatus::Failed => format!("Failed: {}", clip(session.error.as_deref().unwrap_or("unknown error"), 300)),

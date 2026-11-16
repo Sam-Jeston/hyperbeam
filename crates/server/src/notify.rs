@@ -7,7 +7,8 @@
 //!
 //! Only the person who started an agent is told. A worker under a conductor
 //! is quiet: it reports to the conductor, and the conductor's own turns are
-//! what its owner hears about.
+//! what its owner hears about. A conductor that ends a turn while its workers
+//! are still at work is waiting on them, not on its owner, and is quiet too.
 
 use crate::app::App;
 use crate::chat::{self, Button, Outgoing};
@@ -76,6 +77,16 @@ impl App {
             store::session_by_id(&self.db, parent_id).await,
             Ok(Some(parent)) if !matches!(parent.status.as_str(), "cancelled" | "failed")
         )
+    }
+
+    /// Is this session waiting on workers it started, which will prompt it
+    /// when they report, and so not on a person?
+    pub async fn waiting_on_workers(&self, session_id: Uuid) -> bool {
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM sessions WHERE parent_id = $1 AND status IN ('pending', 'starting', 'running'))")
+            .bind(session_id)
+            .fetch_one(&self.db)
+            .await
+            .unwrap_or(false)
     }
 
     /// Tell the session's owner that it needs them. Never fails the caller:
