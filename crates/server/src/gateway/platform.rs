@@ -1,10 +1,11 @@
-//! Tools for the platform itself: shared team notes, workstream updates,
-//! questions to the people an agent works for, and (for conductors) managing
+//! Tools for the platform itself: shared team notes, the knowledge base,
+//! workstream updates, questions to the people an agent works for, and (for conductors) managing
 //! worker agents.
 
 use super::{ToolDef, ToolError, ToolOutput, ToolResult, arg_list, arg_opt, arg_str, schema};
 use crate::app::App;
 use crate::error::ApiError;
+use crate::knowledge::{self, Config};
 use crate::sessions::NewSession;
 use crate::store::{self, Link, Session};
 use hyperbeam_core::protocol::SessionStatus;
@@ -14,6 +15,8 @@ use uuid::Uuid;
 
 const MAX_MEMORY_BYTES: usize = 64 * 1024;
 const MAX_QUESTION_CHARS: usize = 2000;
+/// How much of a document one read returns.
+const MAX_READ_CHARS: usize = 80_000;
 
 pub fn tools() -> Vec<ToolDef> {
     let tool = |name, description, schema, conductor_only| ToolDef { name, description, schema, grant: None, conductor_only };
@@ -26,6 +29,26 @@ pub fn tools() -> Vec<ToolDef> {
             schema(&[("key", "string", "Short kebab-case key, e.g. api-testing", true), ("content", "string", "The note (markdown)", true)]),
             false,
         ),
+        tool(
+            "hyperbeam_knowledge_publish",
+            "Publish a document to the team's knowledge base: a report, an investigation's findings, a design, a write-up. \
+             Use it for anything written for people to read, instead of leaving a file in the sandbox, where it is lost. \
+             Returns the document's link; give that link in your reply.",
+            schema(&[
+                ("title", "string", "What the document is, as a reader would look for it, e.g. Checkout latency investigation", true),
+                ("content", "string", "The whole document (markdown)", true),
+                ("summary", "string", "One sentence saying what it found or decided, shown in lists and search results", false),
+                ("id", "string", "To replace a document this work published earlier, its id", false),
+            ]),
+            false,
+        ),
+        tool(
+            "hyperbeam_knowledge_search",
+            "Search the knowledge base for documents earlier sessions and people published. With no query, lists the newest.",
+            schema(&[("query", "string", "Words to look for", false)]),
+            false,
+        ),
+        tool("hyperbeam_knowledge_read", "Read one document from the knowledge base.", schema(&[("id", "string", "Document id, from a search", true)]), false),
         tool(
             "hyperbeam_update_workstream",
             "Update the workstream this session belongs to: move it between stages or attach a link the team should see.",
@@ -147,6 +170,62 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             .await?;
             app.activity(None, Some(session), None, "memory.updated", &format!("“{}” updated team note `{key}`", session.title), json!({ "key": key })).await;
             Ok(ToolOutput::new(key, format!("Saved note `{key}`.")))
+        }
+        "hyperbeam_knowledge_publish" => {
+            let title = arg_str(args, "title")?;
+            let revise = match arg_opt(args, "id") {
+                Some(id) => Some(id.parse::<Uuid>().map_err(|_| ToolError::Failed("`id` is not a document id".into()))?),
+                None => None,
+            };
+            let published = app.publish_document(session, title, arg_opt(args, "summary"), arg_str(args, "content")?, revise).await?;
+            if !published.revised {
+                let link = Link { kind: "document".into(), title: published.title.clone(), url: published.url.clone() };
+                super::attach_link(app, session, &link).await;
+            }
+            let verb = if published.revised { "revised" } else { "published" };
+            app.activity(
+                None,
+                Some(session),
+                None,
+                "document.published",
+                &format!("“{}” {verb} “{}”", session.title, published.title),
+                json!({ "document_id": published.id, "url": published.url, "title": published.title }),
+            )
+            .await;
+            let text = match published.id {
+                Some(id) => format!(
+                    "{} “{}” in the knowledge base: {}\nIts id is {id}; pass that as `id` to replace it later. Give the link in your reply.",
+                    if published.revised { "Revised" } else { "Published" },
+                    published.title,
+                    published.url
+                ),
+                None => format!("Published “{}” to the team's knowledge base in Notion: {}\nGive the link in your reply.", published.title, published.url),
+            };
+            Ok(ToolOutput::new(published.title, text))
+        }
+        "hyperbeam_knowledge_search" | "hyperbeam_knowledge_read" if Config::load(&app.db).await?.notion_target().is_some() => Err(ToolError::Failed(
+            "the team's knowledge base is in Notion: search and read it with the `notion_*` tools, if this session has them".into(),
+        )),
+        "hyperbeam_knowledge_search" => {
+            let query = arg_opt(args, "query").unwrap_or_default();
+            let found = knowledge::find(&app.db, query, None, 20).await?;
+            let text = if found.is_empty() {
+                if query.is_empty() { "The knowledge base is empty.".to_string() } else { format!("No documents match “{query}”.") }
+            } else {
+                found
+                    .iter()
+                    .map(|d| format!("{} — {} ({})\n  {}", d.id, d.title, d.updated_at.format("%Y-%m-%d"), d.summary))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            Ok(ToolOutput::new(query, text))
+        }
+        "hyperbeam_knowledge_read" => {
+            let id: Uuid = arg_str(args, "id")?.parse().map_err(|_| ToolError::Failed("`id` is not a document id".into()))?;
+            match knowledge::by_id(&app.db, id).await? {
+                Some(doc) => Ok(ToolOutput::new(doc.title.clone(), format!("# {}\n\n{}", doc.title, super::clip(&doc.content, MAX_READ_CHARS)))),
+                None => Err(ToolError::Failed(format!("no document with id `{id}`"))),
+            }
         }
         "hyperbeam_update_workstream" => {
             let Some(ws) = session.workstream_id else {

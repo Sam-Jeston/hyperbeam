@@ -1,11 +1,11 @@
-import { GitPullRequest, Plus, Sprout } from "lucide-react";
+import { FileText, GitPullRequest, Plus, Sprout } from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "../components/ui/button";
 import { Tooltip } from "../components/ui/menu";
 import { Badge, Card, EmptyState, Panel } from "../components/ui/surface";
 import { type Activity, isLive, type Session, type Workstream, type WorkstreamStatus } from "../lib/api";
 import { useStore } from "../lib/store";
-import { A, Avatar, AvatarStack, dayLabel, openComposer, Page, PageHeader, SectionTitle, StatusDot, Time, useDocumentTitle, useTick } from "../lib/ui";
+import { A, Avatar, AvatarStack, dayLabel, openComposer, Page, PageHeader, SectionTitle, SmartLink, StatusDot, Time, useDocumentTitle, useTick } from "../lib/ui";
 import { cn } from "../lib/utils";
 
 export const STAGES: { status: WorkstreamStatus; label: string; hint: string; dot: string }[] = [
@@ -206,7 +206,9 @@ export function Feed({ items, grouped = false }: { items: Activity[]; grouped?: 
                   </div>
                   <div className="min-w-0 flex-1 leading-snug [overflow-wrap:anywhere]">
                     {href ? <A href={href} className="hover:text-primary">{item.summary}</A> : item.summary}
-                    {item.data?.url && (
+                    {item.data?.url && item.kind === "document.published" ? (
+                      <SmartLink href={item.data.url} className="mt-1 flex items-center gap-1 text-[12.5px]"><FileText className="size-3.5" /> Read the document</SmartLink>
+                    ) : item.data?.url && (
                       <a className="mt-1 flex items-center gap-1 text-[12.5px] text-primary hover:underline" href={item.data.url} target="_blank" rel="noreferrer noopener">
                         <GitPullRequest className="size-3.5" /> Open pull request
                       </a>

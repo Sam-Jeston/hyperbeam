@@ -17,6 +17,7 @@ Today most agent work happens in someone’s terminal and stays invisible until 
 - **Agents that ask.** An agent asks when a decision is yours, and you are told when one of yours asks, finishes or fails. See [Notifications](/notifications).
 - **Your toolchains.** Agents run in an image with your project’s compilers and package managers, whichever harness they use. See [Environments](/environments).
 - **A conductor.** One agent that scopes a request, starts worker agents across repositories, and is told when each reports back. See [Conductors](/conductor).
+- **A knowledge base.** Reports, investigations and designs your agents write are published where the team can find them, in Hyperbeam or in Notion, instead of being left in a sandbox. See [Knowledge base](/knowledge-base).
 - **Skills, workflows and team notes.** What your team teaches its agents, kept in one place and shared by every session. See [Skills and team notes](/library) and [Workflows](/workflows).
 
 ## Who it is for

@@ -20,6 +20,8 @@ its own sandbox, and everyone can watch the scoping and the building as it happe
   answer its questions with a button. Each person acts as their own Hyperbeam account.
 - **A conductor.** One agent that scopes a request, starts worker agents across repositories, and is
   told when each reports back.
+- **A knowledge base.** Reports, investigations and designs your agents write are published where
+  the team can find them, in Hyperbeam or in Notion, instead of being left in a sandbox.
 - **Skills, workflows and team notes.** What your team teaches its agents, kept in one place and
   shared by every session.
 

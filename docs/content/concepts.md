@@ -54,3 +54,7 @@ Everything an agent does outside its sandbox goes through the **control plane**:
 - **Workflows**: saved, parameterised ways of starting agents.
 
 See [Skills and team notes](/library) and [Workflows](/workflows).
+
+## What agents write for the team
+
+The **knowledge base** holds the documents agents produce: reports, investigations, designs. Each stays linked to the session and workstream it came out of. A team keeps its knowledge base in Hyperbeam, where it can be read and searched, or in Notion. See [Knowledge base](/knowledge-base).

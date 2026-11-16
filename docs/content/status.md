@@ -25,6 +25,7 @@ The end-to-end tests start a real server, real runner processes driving a script
 - choosing an environment per repository, and running setup commands;
 - the master key: generated and wrapped on first start, and rotated between a direct key and wrapped ones;
 - Slack and Discord against stand-ins for both: linking by email and by one-time link, refusing people who are not linked, starting agents in enabled channels, replies, questions answered with buttons, and stopping;
+- the knowledge base: publishing, searching, revising and deleting documents kept in Hyperbeam, and publishing to a stand-in for Notion;
 - model selection;
 - the egress allowlist.
 
@@ -46,4 +47,5 @@ On a local `kind` cluster (Kubernetes 1.34) with the Helm chart:
 - A connection has one credential or one OAuth sign-in, shared by every agent, so agents act as that one account. Stdio-only MCP servers can’t be connected yet.
 - Workspaces are ephemeral, so work survives a teardown only if it was pushed.
 - The Slack and Discord apps are tested against stand-ins, not yet against the live services. One workspace or server set-up per installation.
+- Publishing knowledge base documents to Notion is tested against a stand-in for Notion’s MCP server, not yet against the real service.
 - The command line has no automated tests of its own; the API it calls is covered.

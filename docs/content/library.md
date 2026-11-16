@@ -26,6 +26,8 @@ Team notes are durable knowledge shared by every agent on the team: conventions,
 
 Each note has a **key** (lowercase letters, digits and dashes) and free-form content. Notes written by an agent are marked as such and link to the session that last wrote them. You can seed, edit and delete notes yourself.
 
+Notes are for standing facts, not for the output of a piece of work. A report, an investigation or a design goes in the [knowledge base](/knowledge-base).
+
 ## Workflows
 
 Workflows also live in the Library. See [Workflows](/workflows).

@@ -13,6 +13,7 @@ pub mod gateway;
 pub mod gitproxy;
 pub mod hub;
 pub mod integrations;
+pub mod knowledge;
 pub mod masterkey;
 pub mod notify;
 pub mod probe;

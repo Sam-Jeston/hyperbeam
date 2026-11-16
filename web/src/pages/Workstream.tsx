@@ -1,4 +1,4 @@
-import { Bot, ExternalLink, MessageSquare, Pencil, Plus } from "lucide-react";
+import { Bot, ExternalLink, FileText, MessageSquare, Pencil, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Composer } from "../components/Composer";
 import { Button } from "../components/ui/button";
@@ -8,7 +8,7 @@ import { Select } from "../components/ui/select";
 import { Card, EmptyState, Panel, Skeleton } from "../components/ui/surface";
 import { api, type Session, type Workstream, type WorkstreamStatus } from "../lib/api";
 import { useStore } from "../lib/store";
-import { Avatar, ErrorNote, Ext, isSubmitKey, Markdown, modKey, Page, PageHeader, SectionTitle, Time, useAction, useDocumentTitle, useLoad, useTick } from "../lib/ui";
+import { Avatar, ErrorNote, isSubmitKey, Markdown, modKey, Page, PageHeader, SectionTitle, SmartLink, Time, useAction, useDocumentTitle, useLoad, useTick } from "../lib/ui";
 import { cn } from "../lib/utils";
 import { AgentRow, Feed, STAGES } from "./Board";
 
@@ -131,7 +131,7 @@ export function WorkstreamPage({ id }: { id: string }) {
             <Panel title="Links">
               <ul className="grid gap-1.5 text-[13px]">
                 {workstream.links.map((l) => (
-                  <li key={l.url} className="min-w-0"><Ext href={l.url} className="flex items-start gap-1.5"><ExternalLink className="mt-0.5 size-3.5 shrink-0" /><span className="[overflow-wrap:anywhere]">{l.title}</span></Ext></li>
+                  <li key={l.url} className="min-w-0"><SmartLink href={l.url} className="flex items-start gap-1.5">{l.kind === "document" ? <FileText className="mt-0.5 size-3.5 shrink-0" /> : <ExternalLink className="mt-0.5 size-3.5 shrink-0" />}<span className="[overflow-wrap:anywhere]">{l.title}</span></SmartLink></li>
                 ))}
               </ul>
             </Panel>

@@ -1,4 +1,4 @@
-import { Activity, Bell, Bot, BookOpen, ChevronsUpDown, LayoutGrid, Loader2, LogOut, Menu as MenuIcon, Monitor, Moon, Plus, Server, Settings, Sun, UserRound, Users } from "lucide-react";
+import { Activity, Bell, Bot, BookOpen, ChevronsUpDown, FileText, LayoutGrid, Loader2, LogOut, Menu as MenuIcon, Monitor, Moon, Plus, Server, Settings, Sun, UserRound, Users } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
@@ -18,6 +18,7 @@ import { ActivityPage, AgentsPage } from "./pages/Agents";
 import { Board } from "./pages/Board";
 import { LinkPage } from "./pages/Chat";
 import { ClusterPage } from "./pages/Cluster";
+import { KnowledgePage } from "./pages/Knowledge";
 import { LibraryPage } from "./pages/Library";
 import { NotificationsPage } from "./pages/Notifications";
 import { SessionPage } from "./pages/Session";
@@ -43,6 +44,7 @@ function useNav(): { section?: string; items: NavItem[] }[] {
       items: [
         { href: "/", label: "Board", icon: <LayoutGrid />, match: (p) => p === "/" || p.startsWith("/w/") },
         { href: "/agents", label: "Agents", icon: <Bot />, badge: { n: liveCount, live: true, title: `${liveCount} agent${liveCount === 1 ? "" : "s"} live` }, match: (p) => p.startsWith("/agents") || p.startsWith("/s/") || p.startsWith("/sessions/") },
+        { href: "/knowledge", label: "Knowledge base", icon: <FileText />, match: (p) => p.startsWith("/knowledge") },
         { href: "/notifications", label: "Notifications", icon: <Bell />, badge: { n: unread, title: `${unread} unread` }, match: (p) => p.startsWith("/notifications") },
         { href: "/activity", label: "Activity", icon: <Activity />, match: (p) => p.startsWith("/activity") },
       ],
@@ -193,6 +195,7 @@ function Shell() {
   else if (a === "agents") page = <AgentsPage />;
   else if (a === "activity") page = <ActivityPage />;
   else if (a === "notifications") page = <NotificationsPage />;
+  else if (a === "knowledge") page = <KnowledgePage id={b} />;
   else if (a === "library") page = <LibraryPage tab={b ?? "skills"} />;
   else if (a === "team") page = <TeamPage />;
   else if (a === "cluster") page = <ClusterPage />;

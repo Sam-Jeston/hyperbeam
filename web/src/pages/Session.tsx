@@ -11,7 +11,7 @@ import { Kbd } from "../components/ui/input";
 import { Badge, Card, KeyValues, Notice, Panel, Skeleton } from "../components/ui/surface";
 import { api, isLive, type Question, type Session, type SessionEvent } from "../lib/api";
 import { markRead, useStore } from "../lib/store";
-import { A, Avatar, clock, ErrorNote, Ext, Markdown, Page, PageHeader, StatusBadge, Time, useAction, useDocumentTitle, useLoad, useTick } from "../lib/ui";
+import { A, Avatar, clock, ErrorNote, Markdown, Page, PageHeader, SmartLink, StatusBadge, Time, useAction, useDocumentTitle, useLoad, useTick } from "../lib/ui";
 import { cn } from "../lib/utils";
 import { AgentRow } from "./Board";
 
@@ -326,7 +326,7 @@ export function SessionPage({ id }: { id: string }) {
             <Panel title="Produced">
               <ul className="grid gap-1.5 text-[13px]">
                 {session.links.map((l) => (
-                  <li key={l.url}><Ext href={l.url} className="flex items-start gap-1.5"><ExternalLink className="mt-0.5 size-3.5 shrink-0" />{l.title}</Ext></li>
+                  <li key={l.url}><SmartLink href={l.url} className="flex items-start gap-1.5">{l.kind === "document" ? <FileText className="mt-0.5 size-3.5 shrink-0" /> : <ExternalLink className="mt-0.5 size-3.5 shrink-0" />}{l.title}</SmartLink></li>
                 ))}
               </ul>
             </Panel>

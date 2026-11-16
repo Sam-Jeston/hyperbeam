@@ -408,6 +408,7 @@ impl FakeMcp {
                 self.calls.lock().unwrap().push((server.to_string(), tool.clone(), args.clone()));
                 let text = match tool.as_str() {
                     "web_search_exa" => format!("Title: The found page\nURL: {}/site/found\nText: Found by search.", self.oauth.lock().unwrap().base),
+                    "notion-create-pages" => json!({ "pages": [{ "id": "page-1", "url": "https://www.notion.so/Published-page-1", "properties": args["pages"][0]["properties"] }] }).to_string(),
                     _ => format!("{server} ran {tool} with {args}"),
                 };
                 json!({ "content": [{ "type": "text", "text": text }] })
@@ -610,6 +611,16 @@ impl Harness {
             .unwrap();
         assert!(response.status().is_success(), "{}", response.text().await.unwrap());
         Client { harness: self, token: token_from(&response) }
+    }
+
+    /// Connect Notion as an admin would: start the sign-in and follow it through.
+    async fn connect_notion(&self, owner: &Client<'_>) {
+        let browser = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+        let location = |response: &reqwest::Response| response.headers().get("location").expect("a redirect").to_str().unwrap().to_string();
+        let authorize = owner.post("/connections", json!({ "preset": "notion" })).await["authorize_url"].as_str().expect("an authorize URL").to_string();
+        let callback = location(&browser.get(&authorize).send().await.unwrap());
+        let finished = browser.get(&callback).bearer_auth(&owner.token).send().await.unwrap();
+        assert_eq!(location(&finished), "/settings/integrations?connected=notion");
     }
 
     async fn connect_github(&self, owner: &Client<'_>) {
@@ -1383,6 +1394,119 @@ async fn notion_connects_by_oauth_and_keeps_its_token_fresh() {
     // Disconnecting forgets the sign-in and everyone's Notion permissions.
     owner.ok(Method::DELETE, "/connections/notion", None).await;
     assert_eq!(ana.get("/me").await["user"]["grants"], json!([]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_publish_documents_to_the_knowledge_base() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    let mia = h.member(&owner, "mia@example.com", &[]).await;
+    let titles = |listing: &Value| listing["documents"].as_array().unwrap().iter().map(|d| d["title"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+
+    // Until someone chooses otherwise, documents are kept in Hyperbeam.
+    let kb = mia.get("/knowledge-base").await;
+    assert_eq!((kb["config"]["mode"].as_str(), kb["notion_connected"].as_bool(), kb["documents"].as_i64()), (Some("internal"), Some(false), Some(0)));
+
+    // An agent publishes its report instead of leaving a file in its sandbox.
+    let prompt = r##"Investigate checkout latency.
+!tools
+!mcp hyperbeam_knowledge_publish {"title": "Checkout latency investigation", "content": "# Checkout latency\n\nThe cart page issues one query per line item.\n\n## Fix\nBatch the lookups."}
+!mcp hyperbeam_knowledge_search {"query": "latency"}
+!say Published the report."##;
+    let created = mia.post("/sessions", json!({ "prompt": prompt, "harness": "scripted", "new_workstream": "Checkout latency" })).await;
+    let id = created["session"]["id"].as_str().unwrap().to_string();
+    let events = mia.wait_turns(&id, 1).await;
+    let listed = tool_output(&events, "tools/list");
+    assert!(listed.contains("hyperbeam_knowledge_publish") && listed.contains("hyperbeam_knowledge_search") && listed.contains("hyperbeam_knowledge_read"), "{listed}");
+
+    // It is indexed: listed, summarised from its first line of prose, and tied to the work it came from.
+    let documents = owner.get("/documents").await;
+    assert_eq!(titles(&documents), ["Checkout latency investigation"]);
+    let doc = documents["documents"][0].clone();
+    let doc_id = doc["id"].as_str().unwrap().to_string();
+    let doc_url = format!("{}/knowledge/{doc_id}", h.base);
+    let session = mia.session(&id).await;
+    assert_eq!(doc["summary"], "The cart page issues one query per line item.");
+    assert_eq!((&doc["session_id"], &doc["workstream_id"], &doc["created_by"]), (&session["id"], &session["workstream_id"], &session["created_by"]));
+    assert!(doc.get("content").is_none(), "a listing leaves the body out: {doc}");
+    assert!(tool_output(&events, "hyperbeam_knowledge_publish").contains(&doc_url));
+    let link = json!({ "kind": "document", "title": "Checkout latency investigation", "url": doc_url });
+    assert_eq!(session["links"], json!([link]));
+    let workstream = mia.get(&format!("/workstreams/{}", session["workstream_id"].as_str().unwrap())).await;
+    assert_eq!(workstream["workstream"]["links"], json!([link]));
+    assert!(owner.get("/activity").await["activity"].as_array().unwrap().iter().any(|a| a["kind"] == "document.published" && a["data"]["document_id"] == doc_id.as_str()));
+
+    // Agents and people find it by what it says, or by part of its title.
+    let found = tool_output(&events, "hyperbeam_knowledge_search");
+    assert!(found.contains(&doc_id) && found.contains("Checkout latency investigation") && found.contains("one query per line item"), "{found}");
+    assert_eq!(titles(&owner.get("/documents?q=batching+lookups").await), ["Checkout latency investigation"]);
+    assert_eq!(titles(&owner.get("/documents?q=Checko").await), ["Checkout latency investigation"]);
+    assert!(titles(&owner.get("/documents?q=kubernetes").await).is_empty());
+    assert_eq!(owner.get(&format!("/documents/{doc_id}")).await["document"]["content"].as_str().unwrap().lines().next(), Some("# Checkout latency"));
+
+    // The session that wrote it may revise it; unrelated work may read it, not rewrite it.
+    mia.post(&format!("/sessions/{id}/messages"), json!({ "text": format!(r##"!mcp hyperbeam_knowledge_publish {{"id": "{doc_id}", "title": "Checkout latency investigation", "summary": "N+1 queries on the cart page.", "content": "Revised."}}"##) })).await;
+    mia.wait_turns(&id, 2).await;
+    let revised = owner.get(&format!("/documents/{doc_id}")).await["document"].clone();
+    assert_eq!((revised["summary"].as_str(), revised["content"].as_str()), (Some("N+1 queries on the cart page."), Some("Revised.")));
+    assert_eq!(mia.session(&id).await["links"], json!([link]), "a revision is the same document");
+    let other = owner.post("/sessions", json!({ "harness": "scripted", "prompt": format!(r##"!mcp hyperbeam_knowledge_read {{"id": "{doc_id}"}}
+!mcp hyperbeam_knowledge_publish {{"id": "{doc_id}", "title": "Mine now", "content": "Overwritten."}}"##) })).await;
+    let events = owner.wait_turns(other["session"]["id"].as_str().unwrap(), 1).await;
+    assert_eq!(tool_output(&events, "hyperbeam_knowledge_read"), "# Checkout latency investigation\n\nRevised.");
+    assert!(tool_output(&events, "hyperbeam_knowledge_publish").contains("Denied"));
+
+    // People write and edit documents too. Deleting one takes its links with it.
+    assert_eq!(mia.call(Method::POST, "/documents", Some(json!({ "title": " ", "content": "x" }))).await.0, StatusCode::BAD_REQUEST);
+    let written = mia.post("/documents", json!({ "title": "Runbook: failover", "content": "Promote the replica." })).await["document"].clone();
+    assert_eq!((&written["session_id"], written["summary"].as_str()), (&Value::Null, Some("Promote the replica.")));
+    let edited = owner.ok(Method::PUT, &format!("/documents/{doc_id}"), Some(json!({ "title": "Checkout latency", "summary": "", "content": "Edited by hand." }))).await;
+    assert_eq!((edited["document"]["title"].as_str(), edited["document"]["updated_by"].as_str()), (Some("Checkout latency"), owner.get("/me").await["user"]["id"].as_str()));
+    owner.ok(Method::DELETE, &format!("/documents/{doc_id}"), None).await;
+    assert_eq!(titles(&owner.get("/documents").await), ["Runbook: failover"]);
+    assert_eq!(mia.session(&id).await["links"], json!([]));
+    assert_eq!(owner.call(Method::GET, &format!("/documents/{doc_id}"), None).await.0, StatusCode::NOT_FOUND);
+
+    // An admin can keep the knowledge base in Notion instead, once Notion is connected.
+    let page = "https://www.notion.so/acme/Agent-reports-1f0c2b3a4d5e6f708192a3b4c5d6e7f8";
+    let in_notion = json!({ "mode": "notion", "notion_page": page });
+    assert_eq!(mia.call(Method::PUT, "/knowledge-base", Some(in_notion.clone())).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(owner.call(Method::PUT, "/knowledge-base", Some(in_notion.clone())).await.0, StatusCode::BAD_REQUEST);
+    h.connect_notion(&owner).await;
+    assert_eq!(owner.call(Method::PUT, "/knowledge-base", Some(json!({ "mode": "notion" }))).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(owner.call(Method::PUT, "/knowledge-base", Some(json!({ "mode": "notion", "notion_page": "https://www.notion.so/acme/Agent-reports" }))).await.0, StatusCode::BAD_REQUEST);
+    let kb = owner.ok(Method::PUT, "/knowledge-base", Some(in_notion)).await;
+    assert_eq!(kb["config"], json!({ "mode": "notion", "notion": { "page_id": "1f0c2b3a-4d5e-6f70-8192-a3b4c5d6e7f8", "url": page, "title": "" } }));
+    assert_eq!((kb["notion_connected"].as_bool(), kb["documents"].as_i64()), (Some(true), Some(1)));
+
+    // From then on a published document is a page under the chosen one. Publishing there is the
+    // team's setting at work, so it needs no Notion permission of the session's own.
+    let prompt = r##"!tools
+!mcp hyperbeam_knowledge_publish {"title": "Search relevance review", "summary": "Stemming is off for product names.", "content": "# Findings\nTurn stemming on."}
+!mcp hyperbeam_knowledge_search {"query": "stemming"}
+!mcp notion_create-pages {}"##;
+    let created = mia.post("/sessions", json!({ "prompt": prompt, "harness": "scripted" })).await;
+    let id = created["session"]["id"].as_str().unwrap().to_string();
+    let events = mia.wait_turns(&id, 1).await;
+    let listed = tool_output(&events, "tools/list");
+    assert!(listed.contains("hyperbeam_knowledge_publish") && !listed.contains("hyperbeam_knowledge_search") && !listed.contains("notion_"), "{listed}");
+    assert!(tool_output(&events, "hyperbeam_knowledge_publish").contains("https://www.notion.so/Published-page-1"));
+    assert!(tool_output(&events, "hyperbeam_knowledge_search").contains("in Notion"));
+    assert!(tool_output(&events, "notion_create-pages").contains("Denied"));
+    let calls = h.mcp.calls.lock().unwrap().clone();
+    let made: Vec<&Value> = calls.iter().filter(|(server, tool, _)| server == "notion" && tool == "notion-create-pages").map(|(_, _, args)| args).collect();
+    assert_eq!(made.len(), 1, "{calls:?}");
+    assert_eq!(made[0]["parent"], json!({ "page_id": "1f0c2b3a-4d5e-6f70-8192-a3b4c5d6e7f8" }));
+    assert_eq!(made[0]["pages"][0]["properties"], json!({ "title": "Search relevance review" }));
+    let body = made[0]["pages"][0]["content"].as_str().unwrap();
+    assert!(body.starts_with("Stemming is off for product names.\n\n# Findings\nTurn stemming on.") && body.contains(&format!("for Mia Member: {}/s/{id}", h.base)), "{body}");
+    assert_eq!(mia.session(&id).await["links"], json!([{ "kind": "document", "title": "Search relevance review", "url": "https://www.notion.so/Published-page-1" }]));
+    assert_eq!(titles(&owner.get("/documents").await), ["Runbook: failover"], "nothing new is kept in Hyperbeam");
+
+    // Switching back remembers where in Notion it was.
+    let kb = owner.ok(Method::PUT, "/knowledge-base", Some(json!({ "mode": "internal" }))).await;
+    assert_eq!((kb["config"]["mode"].as_str(), kb["config"]["notion"]["url"].as_str()), (Some("internal"), Some(page)));
+    assert_eq!(owner.ok(Method::PUT, "/knowledge-base", Some(json!({ "mode": "notion" }))).await["config"]["mode"], "notion");
 }
 
 // --------------------------------------------------------------- chat apps

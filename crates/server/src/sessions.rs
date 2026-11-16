@@ -931,6 +931,30 @@ impl App {
             p.push_str(&format!("\n## Team notes\nAvailable via `hyperbeam_memory_read`: {}\n", keys.join(", ")));
         }
 
+        p.push_str(
+            "\n## Knowledge base\n\
+             A report, an investigation's findings, a design, a write-up: anything you write for people to read \
+             goes in the team's knowledge base, not in a file in the sandbox, which is lost with it. Publish it with \
+             `hyperbeam_knowledge_publish` (markdown, with a one-sentence summary) and give its link in your reply. \
+             Files a task asks you to add to a repository still belong in the repository. ",
+        );
+        match crate::knowledge::Config::load(&self.db).await?.notion_target() {
+            Some(target) => {
+                let place = if target.title.is_empty() { "a page the team chose".to_string() } else { format!("“{}”", target.title) };
+                p.push_str(&format!("The team keeps it in Notion, under {place} ({}): the tool creates the page there for you.", target.url));
+                if grants.allows("notion", hyperbeam_core::Level::Read) {
+                    p.push_str(" `notion_search` finds what earlier work published; look before repeating an investigation.");
+                }
+            }
+            None => p.push_str(
+                "`hyperbeam_knowledge_search` and `hyperbeam_knowledge_read` find what earlier work published; \
+                 look before repeating an investigation.",
+            ),
+        }
+        p.push_str(
+            "\nTeam notes are for something else: short standing facts every session should know, not the output of a piece of work.\n",
+        );
+
         if session.role == "conductor" {
             p.push_str(
                 "\n## You are a conductor\n\

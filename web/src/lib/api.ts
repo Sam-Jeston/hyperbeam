@@ -55,6 +55,40 @@ export interface Link {
   url: string;
 }
 
+/** Where the team keeps the documents its agents write. */
+export interface KnowledgeBase {
+  config: {
+    mode: "internal" | "notion";
+    /** The Notion page documents are created under; remembered while the mode is internal. */
+    notion?: { page_id: string; url: string; title: string };
+  };
+  /** Whether Notion is connected, so it can be chosen. */
+  notion_connected: boolean;
+  /** How many documents Hyperbeam itself holds. */
+  documents: number;
+  /** Something worth telling the admin who just saved. */
+  caution: string | null;
+}
+
+/** A document in a list: everything but its body. */
+export interface DocumentSummary {
+  id: string;
+  title: string;
+  summary: string;
+  /** The agent session that published it; null when a person wrote it. */
+  session_id: string | null;
+  workstream_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeDocument extends DocumentSummary {
+  content: string;
+  /** The person who last edited it by hand. */
+  updated_by: string | null;
+}
+
 export type SessionStatus = "pending" | "starting" | "running" | "idle" | "completed" | "failed" | "cancelled";
 
 /** A question an agent asked with `hyperbeam_ask_user` that nobody has answered yet. */

@@ -116,7 +116,7 @@ export function Connections({ isAdmin }: { isAdmin: boolean }) {
 }
 
 /** A service's brand mark on a white tile, or its initial when it has none. */
-function ServiceLogo({ id, title }: { id?: string; title: string }) {
+export function ServiceLogo({ id, title }: { id?: string; title: string }) {
   const logo = id ? LOGOS[id] : undefined;
   if (!logo) {
     return <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-surface-2 font-display text-[17px] font-bold text-foreground">{title.charAt(0).toUpperCase()}</div>;

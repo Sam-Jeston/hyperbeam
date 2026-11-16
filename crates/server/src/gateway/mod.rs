@@ -137,8 +137,11 @@ async fn visible_tools(app: &App, session: &Session) -> Vec<Value> {
     if web::Policy::load(app).await.is_ok_and(|policy| policy.mode != web::Mode::Off) {
         connected.push(hyperbeam_core::grants::WEB.to_string());
     }
+    // Documents kept in Notion are searched and read with Notion's own tools.
+    let in_notion = crate::knowledge::Config::load(&app.db).await.is_ok_and(|config| config.notion_target().is_some());
     let mut tools: Vec<Value> = catalog()
         .into_iter()
+        .filter(|tool| !(in_notion && matches!(tool.name, "hyperbeam_knowledge_search" | "hyperbeam_knowledge_read")))
         .filter(|tool| match &tool.grant {
             Some(grant) => session.grants.has(grant) && connected.iter().any(|kind| kind == grant.system()),
             None => true,
@@ -389,7 +392,13 @@ pub async fn handle(State(app): State<App>, parts: Parts, Json(request): Json<Va
             // and a question is shown in the log as itself.
             let quiet = matches!(
                 name.as_str(),
-                "hyperbeam_memory_list" | "hyperbeam_memory_read" | "hyperbeam_list_agents" | "hyperbeam_get_agent" | "hyperbeam_ask_user"
+                "hyperbeam_memory_list"
+                    | "hyperbeam_memory_read"
+                    | "hyperbeam_knowledge_search"
+                    | "hyperbeam_knowledge_read"
+                    | "hyperbeam_list_agents"
+                    | "hyperbeam_get_agent"
+                    | "hyperbeam_ask_user"
             ) && !failed;
             let detail = if failed { text.chars().take(500).collect::<String>() } else { String::new() };
             store::record_audit(&app.db, &session, &name, &target, allowed, &detail).await.ok();

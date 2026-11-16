@@ -4,6 +4,7 @@ mod account;
 mod chat;
 mod cluster;
 mod connections;
+mod knowledge;
 mod notifications;
 mod settings;
 mod work;
@@ -88,6 +89,9 @@ pub fn router() -> Router<App> {
         .route("/workflows/{id}/run", post(work::run_workflow))
         .route("/memory", get(settings::list_memory))
         .route("/memory/{key}", put(settings::put_memory).delete(settings::delete_memory))
+        .route("/knowledge-base", get(knowledge::get_config).put(knowledge::put_config))
+        .route("/documents", get(knowledge::list).post(knowledge::create))
+        .route("/documents/{id}", get(knowledge::get).put(knowledge::update).delete(knowledge::delete))
         // work
         .route("/workstreams", get(work::list_workstreams).post(work::create_workstream))
         .route("/workstreams/{id}", get(work::get_workstream).patch(work::update_workstream))

@@ -61,6 +61,22 @@ export function Ext({ href, className, children }: { href: string; className?: s
   );
 }
 
+/** The in-app path of a link to this Hyperbeam, or null for a link elsewhere. */
+export function localPath(url: string): string | null {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return parsed.origin === window.location.origin ? parsed.pathname + parsed.search : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A link that stays in the app when it points into it, and opens a new tab otherwise. */
+export function SmartLink({ href, className, children }: { href: string; className?: string; children: ReactNode }) {
+  const path = localPath(href);
+  return path ? <A href={path} className={cn("text-primary underline-offset-2 hover:underline", className)}>{children}</A> : <Ext href={href} className={className}>{children}</Ext>;
+}
+
 // --------------------------------------------------------------------- time
 
 export function timeAgo(iso: string | null | undefined): string {
@@ -393,7 +409,7 @@ export function useLoad<T>(load: () => Promise<T>, deps: unknown[]): { data: T |
 
 function inline(text: string, key: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const pattern = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\))|(https?:\/\/[^\s<>)\]]+)/g;
+  const pattern = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)/g;
   let last = 0;
   let match: RegExpExecArray | null;
   let i = 0;
@@ -407,12 +423,21 @@ function inline(text: string, key: string): ReactNode[] {
       out.push(<a key={k} href={match[4]} target="_blank" rel="noreferrer noopener">{label}</a>);
     } else if (match[5]) {
       out.push(<a key={k} href={match[5]} target="_blank" rel="noreferrer noopener">{match[5]}</a>);
+    } else if (match[6]) {
+      out.push(<em key={k}>{match[6].slice(1, -1)}</em>);
     }
     last = match.index + match[0].length;
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
 }
+
+const LIST_ITEM = /^\s*([-*]|\d+\.)\s+/;
+const RULE = /^\s*(-{3,}|\*{3,}|_{3,})\s*$/;
+const TABLE_DIVIDER = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const cells = (row: string) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+/** Where a paragraph ends: at a blank line, or where another kind of block begins. */
+const startsBlock = (line: string) => line.trim() === "" || line.trimStart().startsWith("```") || /^(#{1,4})\s+/.test(line) || LIST_ITEM.test(line) || RULE.test(line) || line.startsWith(">");
 
 export function Markdown({ text, className }: { text: string; className?: string }) {
   const blocks: ReactNode[] = [];
@@ -437,6 +462,33 @@ export function Markdown({ text, className }: { text: string; className?: string
       i++;
       continue;
     }
+    if (RULE.test(line)) {
+      blocks.push(<hr key={key++} />);
+      i++;
+      continue;
+    }
+    if (line.startsWith(">")) {
+      const quoted: string[] = [];
+      while (i < lines.length && lines[i].startsWith(">")) quoted.push(lines[i++].replace(/^>\s?/, ""));
+      blocks.push(<blockquote key={key++}>{inline(quoted.join("\n"), `q${key}`)}</blockquote>);
+      continue;
+    }
+    if (line.includes("|") && i + 1 < lines.length && lines[i + 1].includes("-") && TABLE_DIVIDER.test(lines[i + 1])) {
+      const head = cells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") rows.push(cells(lines[i++]));
+      const k = key++;
+      blocks.push(
+        <div key={k} className="table-wrap">
+          <table>
+            <thead><tr>{head.map((cell, c) => <th key={c}>{inline(cell, `th${k}-${c}`)}</th>)}</tr></thead>
+            <tbody>{rows.map((row, r) => <tr key={r}>{head.map((_, c) => <td key={c}>{inline(row[c] ?? "", `td${k}-${r}-${c}`)}</td>)}</tr>)}</tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
     if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
       const ordered = /^\s*\d+\./.test(line);
       const items: ReactNode[] = [];
@@ -452,9 +504,9 @@ export function Markdown({ text, className }: { text: string; className?: string
       continue;
     }
     const para: string[] = [];
-    while (i < lines.length && lines[i].trim() !== "" && !lines[i].trimStart().startsWith("```") && !/^(#{1,4})\s+/.test(lines[i]) && !/^\s*([-*]|\d+\.)\s+/.test(lines[i])) {
-      para.push(lines[i++]);
-    }
+    // The line that got here starts no block of its own, so it is always taken.
+    do para.push(lines[i++]);
+    while (i < lines.length && !startsBlock(lines[i]));
     blocks.push(<p key={key++}>{inline(para.join("\n"), `p${key}`)}</p>);
   }
   return <div className={cn("prose-agent", className)}>{blocks}</div>;
