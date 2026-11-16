@@ -1,13 +1,14 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import {
   ArrowDown, ChevronRight, CircleCheck, CircleStop, CircleX, ExternalLink, FilePen, FileText, FolderGit2, Globe, Hand, Lightbulb,
-  Loader2, MessageCircleQuestion, MessageSquareWarning, Search, SendHorizontal, ShieldCheck, ShieldX, Terminal, Trash2, Wrench,
+  ListTree, Loader2, MessageCircleQuestion, MessageSquareWarning, Search, SendHorizontal, ShieldCheck, ShieldX, Terminal, Trash2, Wrench,
 } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BrandMark } from "../components/ui/brand";
 import { Button } from "../components/ui/button";
 import { confirm } from "../components/ui/dialog";
 import { Kbd } from "../components/ui/input";
+import { TabCount, Tabs } from "../components/ui/menu";
 import { Badge, Card, KeyValues, Notice, Panel, Skeleton } from "../components/ui/surface";
 import { api, isLive, type Question, type ReviewLoop, type Session, type SessionEvent, type Verdict } from "../lib/api";
 import { markRead, useStore } from "../lib/store";
@@ -103,6 +104,61 @@ function fold(events: SessionEvent[]): { items: Item[]; plan: any[] | null } {
   return { items, plan };
 }
 
+type Call = Extract<Item, { type: "tool" | "thought" | "gate" }>;
+type Row = Exclude<Item, Call> | Extract<Item, { type: "gate" }> | { type: "work"; key: number; calls: Call[] };
+
+/** A gateway decision the reader should see without going looking for it. */
+const notable = (item: Item) => item.type === "gate" && (item.data.allowed === false || !!item.data.failed);
+
+/** The transcript as a conversation: each run of calls becomes one line that says what was done. */
+function summarize(items: Item[]): Row[] {
+  const rows: Row[] = [];
+  for (const item of items) {
+    if ((item.type === "tool" || item.type === "thought" || item.type === "gate") && !notable(item)) {
+      const last = rows[rows.length - 1];
+      if (last?.type === "work") last.calls.push(item);
+      else rows.push({ type: "work", key: item.key, calls: [item] });
+    } else {
+      rows.push(item as Row);
+    }
+  }
+  return rows;
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+const WORK_PHRASE: Record<string, (n: number) => string> = {
+  execute: (n) => `ran ${plural(n, "command")}`,
+  read: (n) => `read ${plural(n, "file")}`,
+  edit: (n) => `made ${plural(n, "edit")}`,
+  search: (n) => `searched ${plural(n, "time")}`,
+  fetch: (n) => `fetched ${plural(n, "page")}`,
+  delete: (n) => `deleted ${plural(n, "file")}`,
+  move: (n) => `moved ${plural(n, "file")}`,
+};
+
+/** What a run of calls amounted to, in a sentence. */
+function describeWork(calls: Call[]): { text: string; failed: number } {
+  const counts = new Map<string, number>();
+  let failed = 0;
+  let gates = 0;
+  for (const call of calls) {
+    if (call.type === "gate") gates++;
+    if (call.type !== "tool") continue;
+    const kind = call.data.kind in WORK_PHRASE ? call.data.kind : call.data.kind === "think" ? "think" : "other";
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    if (call.data.status === "failed") failed++;
+  }
+  counts.delete("think");
+  const other = counts.get("other") ?? 0;
+  counts.delete("other");
+  const parts = [...counts].map(([kind, n]) => WORK_PHRASE[kind]!(n));
+  if (other) parts.push(parts.length ? `used ${plural(other, "other tool")}` : `made ${plural(other, "tool call")}`);
+  if (gates) parts.push(`took ${plural(gates, "outside action")}`);
+  const text = parts.length ? parts.join(" · ") : "thought it over";
+  return { text: text.charAt(0).toUpperCase() + text.slice(1), failed };
+}
+
 function useEvents(id: string) {
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [caughtUp, setCaughtUp] = useState(false);
@@ -152,6 +208,11 @@ export function SessionPage({ id }: { id: string }) {
   const { data, error, reload, set } = useLoad<Detail>(() => api.get(`/sessions/${id}`), [id]);
   const { events, caughtUp } = useEvents(id);
   const { items, plan } = useMemo(() => fold(events), [events]);
+  const rows = useMemo(() => summarize(items), [items]);
+  const calls = useMemo(() => items.filter((i): i is Call => i.type === "tool" || i.type === "thought" || i.type === "gate"), [items]);
+  const [tab, setTab] = useState<"transcript" | "calls">("transcript");
+  // The call to land on when a summary line opens the calls tab.
+  const target = useRef<number | null>(null);
   const action = useAction();
   const bottom = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
@@ -193,6 +254,17 @@ export function SessionPage({ id }: { id: string }) {
     if (stuck.current) bottom.current?.scrollIntoView({ block: "end" });
     else if (caughtUp) setBehind(true);
   }, [events.length, caughtUp, !!data]);
+  useLayoutEffect(() => {
+    const call = target.current === null ? null : document.getElementById(`call-${target.current}`);
+    target.current = null;
+    if (call) {
+      stuck.current = false;
+      call.scrollIntoView({ block: "start" });
+    } else {
+      stuck.current = true;
+      bottom.current?.scrollIntoView({ block: "end" });
+    }
+  }, [tab]);
 
   if (error) return <Page><ErrorNote title="Could not open this session" error={error} /></Page>;
   if (!data || !session) return <SessionSkeleton />;
@@ -205,6 +277,11 @@ export function SessionPage({ id }: { id: string }) {
     ...(data.workstream ? [{ label: data.workstream.title, href: `/w/${data.workstream.id}` }] : [{ label: "Agents", href: "/agents" }]),
     ...(data.parent ? [{ label: data.parent.title, href: `/s/${data.parent.id}` }] : []),
   ];
+
+  // What the agent is doing right now: the newest call since it last spoke.
+  const lastItem = items[items.length - 1];
+  const current = session.status === "running" && lastItem?.type === "tool" ? lastItem.data.title : null;
+  const toolCount = calls.filter((c) => c.type === "tool").length;
 
   const stop = async () => {
     const ok = await confirm({
@@ -245,25 +322,56 @@ export function SessionPage({ id }: { id: string }) {
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
         {/* Fills the viewport so the reply box sits at the bottom even when the transcript is short. */}
         <div className="flex min-h-[calc(100dvh-180px)] min-w-0 flex-col">
-          <div className="grid flex-1 content-start gap-3.5 pb-4" aria-live="polite" aria-busy={!caughtUp}>
+          <Tabs
+            className="mb-4"
+            value={tab}
+            onValueChange={setTab}
+            tabs={[
+              { value: "transcript", label: "Transcript" },
+              { value: "calls", label: <>Calls <TabCount n={toolCount} /></> },
+            ]}
+          />
+          <div className="grid flex-1 grid-cols-1 content-start gap-3.5 pb-4" aria-live="polite" aria-busy={!caughtUp}>
             {!caughtUp && items.length === 0 && <TranscriptSkeleton />}
-            {items.map((item) =>
-              item.type === "question" ? (
-                <QuestionCard
-                  key={item.key}
-                  sessionId={id}
-                  question={item}
-                  open={session.question?.id === item.id}
-                  canAnswer={data.can_drive}
-                  onAnswered={() => (stuck.current = true)}
-                />
-              ) : (
-                <TranscriptItem key={item.key} item={item} />
-              ),
+            {tab === "calls" ? (
+              <>
+                {caughtUp && calls.length === 0 && <p className="text-[13px] text-muted">No calls yet. Every command, file read, edit and tool call the agent makes is listed here.</p>}
+                {calls.map((call) => (
+                  <div key={call.key} id={`call-${call.key}`} className="min-w-0 scroll-mt-4">
+                    <TranscriptItem item={call} />
+                  </div>
+                ))}
+              </>
+            ) : (
+              rows.map((row) =>
+                row.type === "question" ? (
+                  <QuestionCard
+                    key={row.key}
+                    sessionId={id}
+                    question={row}
+                    open={session.question?.id === row.id}
+                    canAnswer={data.can_drive}
+                    onAnswered={() => (stuck.current = true)}
+                  />
+                ) : row.type === "work" ? (
+                  <WorkSummary
+                    key={row.key}
+                    calls={row.calls}
+                    onOpen={() => {
+                      target.current = row.key;
+                      setTab("calls");
+                    }}
+                  />
+                ) : (
+                  <TranscriptItem key={row.key} item={row} />
+                ),
+              )
             )}
             {session.status === "running" && (
-              <div className="flex items-center gap-2 text-[13px] text-muted">
-                <Loader2 className="size-3.5 animate-spin text-run" /> Working
+              <div className="flex min-w-0 items-center gap-2 text-[13px] text-muted">
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-run" />
+                <span className="shrink-0">Working</span>
+                {current && <span className="min-w-0 truncate font-mono text-[12.5px] text-faint" title={current}>{current}</span>}
               </div>
             )}
             {(session.status === "starting" || session.status === "pending") && (
@@ -542,6 +650,24 @@ function PlanPanel({ plan }: { plan: any[] }) {
         ))}
       </ul>
     </Panel>
+  );
+}
+
+/** One line standing in for a run of calls. The calls themselves are a click away. */
+function WorkSummary({ calls, onOpen }: { calls: Call[]; onOpen: () => void }) {
+  const { text, failed } = describeWork(calls);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title="See these calls"
+      className="group flex w-fit max-w-full items-center gap-1.5 rounded-sm text-left text-[12.5px] text-muted hover:text-foreground"
+    >
+      <ListTree className="size-3.5 shrink-0" />
+      <span className="min-w-0 truncate">{text}</span>
+      {failed > 0 && <span className="shrink-0 text-fail">· {failed} failed</span>}
+      <ChevronRight className="size-3.5 shrink-0 text-faint group-hover:text-foreground" />
+    </button>
   );
 }
 
