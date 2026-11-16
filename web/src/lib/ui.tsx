@@ -386,7 +386,7 @@ export function useAction() {
 }
 
 /** Fetch on mount and whenever `deps` change. */
-export function useLoad<T>(load: () => Promise<T>, deps: unknown[]): { data: T | null; error: string | null; reload: () => void } {
+export function useLoad<T>(load: () => Promise<T>, deps: unknown[]): { data: T | null; error: string | null; reload: () => void; set: (data: T) => void } {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [n, setN] = useState(0);
@@ -400,7 +400,8 @@ export function useLoad<T>(load: () => Promise<T>, deps: unknown[]): { data: T |
       cancelled = true;
     };
   }, [...deps, n]);
-  return { data, error, reload: () => setN((x) => x + 1) };
+  // `set` takes fresh data a write already returned, so nothing renders stale in between.
+  return { data, error, reload: () => setN((x) => x + 1), set: setData };
 }
 
 // ----------------------------------------------------------------- markdown

@@ -672,7 +672,7 @@ function HarnessDialog({ harness, onClose }: { harness: Harness | null; onClose:
 // ------------------------------------------------------------------- general
 
 function General() {
-  const { data, error, reload } = useLoad<any>(() => api.get("/settings"), []);
+  const { data, error, set } = useLoad<any>(() => api.get("/settings"), []);
   const harnesses = useLoad<{ harnesses: Harness[] }>(() => api.get("/harnesses"), []);
   const [form, setForm] = useState<{ team_name: string; default_harness: string; egress: string; web_mode: string; web_domains: string } | null>(null);
   const action = useAction();
@@ -696,13 +696,13 @@ function General() {
   const lines = (text: string) => text.split("\n").map((l) => l.trim()).filter(Boolean);
   const save = () =>
     action.run(async () => {
-      await api.put("/settings", {
+      // The response is the saved settings; re-seed the form from it rather than a refetch still in flight.
+      set(await api.put("/settings", {
         team_name: form.team_name,
         default_harness: form.default_harness,
         egress_allow: lines(form.egress),
         web_access: { mode: form.web_mode, domains: lines(form.web_domains) },
-      });
-      reload();
+      }));
       setForm(null);
     }, { success: "Settings saved" });
   return (
