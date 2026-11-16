@@ -237,6 +237,10 @@ pub async fn create_session(State(app): State<App>, AuthUser(user): AuthUser, Js
                 skills: body.skills,
                 grants,
                 workflow: None,
+                plan: None,
+                agent: None,
+                reports_verdict: false,
+                branch_of: None,
                 model: body.model,
                 environment: body.environment,
                 context: None,
@@ -267,6 +271,7 @@ pub async fn run_workflow(State(app): State<App>, AuthUser(user): AuthUser, Path
         .ok_or(ApiError::NotFound("workflow"))?;
     let spec = WorkflowSpec::from_yaml(&workflow.yaml).map_err(|e| ApiError::bad(e.to_string()))?;
     let prompt = spec.render(&body.inputs).map_err(|e| ApiError::bad(e.to_string()))?;
+    let plan = spec.plan(&body.inputs).map_err(|e| ApiError::bad(e.to_string()))?;
     let workstream_id = match (&body.new_workstream, body.workstream_id) {
         (Some(title), _) if !title.trim().is_empty() => Some(app.open_workstream(&user, title, &prompt, &spec.repos).await?.id),
         (_, id) => id,
@@ -286,6 +291,10 @@ pub async fn run_workflow(State(app): State<App>, AuthUser(user): AuthUser, Path
                 // A workflow with no grants listed asks for none.
                 grants: Some(spec.grants.clone()),
                 workflow: Some(spec.name.clone()),
+                plan,
+                agent: None,
+                reports_verdict: false,
+                branch_of: None,
                 model: body.model.or_else(|| spec.model.clone()),
                 environment: body.environment.or_else(|| spec.environment.clone()),
                 context: None,
@@ -318,8 +327,16 @@ pub async fn get_session(State(app): State<App>, AuthUser(user): AuthUser, Path(
         Some(id) => store::environment_by_id(&app.db, id).await?,
         None => None,
     };
+    let review_loop = crate::review::loop_state(&app.db, id).await?;
+    let mut ids: Vec<Uuid> = children.iter().map(|child| child.id).collect();
+    ids.push(id);
+    let verdicts = crate::review::latest_verdicts(&app.db, &ids).await?;
     Ok(Json(json!({
         "session": session,
+        // For a conductor whose workflow declares one: where its loop stands.
+        "loop": review_loop,
+        // The latest verdict of this session and of each agent it started.
+        "verdicts": verdicts,
         "environment": environment.map(|e| json!({ "name": e.name, "image": e.image })),
         "harness": harness.map(|h| {
             // What the session runs on, by its display name where known.
@@ -332,6 +349,19 @@ pub async fn get_session(State(app): State<App>, AuthUser(user): AuthUser, Path(
         "workstream": workstream.map(|(id, title)| json!({ "id": id, "title": title })),
         "can_drive": can_drive(&user, &session),
     })))
+}
+
+#[derive(Deserialize)]
+pub struct AllowRounds {
+    rounds: u32,
+}
+
+/// Let a conductor's loop run for more rounds than its workflow allowed.
+pub async fn allow_rounds(State(app): State<App>, AuthUser(user): AuthUser, Path(id): Path<Uuid>, Json(body): Json<AllowRounds>) -> ApiResult<Json<Value>> {
+    let session = load_session(&app, id).await?;
+    require_drive(&user, &session)?;
+    let state = app.allow_rounds(&session, &user, body.rounds).await?;
+    Ok(Json(json!({ "loop": state })))
 }
 
 #[derive(Deserialize)]

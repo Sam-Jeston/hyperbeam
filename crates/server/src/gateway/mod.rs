@@ -147,6 +147,7 @@ async fn visible_tools(app: &App, session: &Session) -> Vec<Value> {
             None => true,
         })
         .filter(|tool| !tool.conductor_only || session.role == "conductor")
+        .filter(|tool| tool.name != platform::REPORT_VERDICT || session.reports_verdict)
         .map(|t| json!({ "name": t.name, "description": t.description, "inputSchema": t.schema }))
         .collect();
     for conn in connections::all(&app.db).await.unwrap_or_default() {
@@ -256,6 +257,9 @@ async fn call_tool(app: &App, session: &Session, name: &str, args: &Value) -> To
         }
     if tool.conductor_only && session.role != "conductor" {
         return Err(ToolError::Denied("only conductor sessions can manage other agents".into()));
+    }
+    if tool.name == platform::REPORT_VERDICT && !session.reports_verdict {
+        return Err(ToolError::Denied("this session was not asked for a verdict; say what you found in your closing message".into()));
     }
     match name.split('_').next() {
         Some("github") => github::call(app, session, name, args).await,

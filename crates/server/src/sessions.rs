@@ -9,7 +9,7 @@ use crate::sandbox::LaunchRequest;
 use crate::store::{self, Event, Harness, Question, Repo, Session, User};
 use anyhow::{Context, Result, anyhow};
 use hyperbeam_core::protocol::{HarnessSpec, RepoSpec, RunSpec, RunnerMsg, ServerMsg, SessionStatus, SkillSpec, event};
-use hyperbeam_core::workflow::SessionRole;
+use hyperbeam_core::workflow::{Plan, SessionRole};
 use hyperbeam_core::{Grant, GrantSet, Level};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
@@ -70,6 +70,14 @@ pub struct NewSession {
     /// Upper bound on the session's grants; `None` means "all I hold".
     pub grants: Option<GrantSet>,
     pub workflow: Option<String>,
+    /// For a conductor: the agents and loop its workflow declares.
+    pub plan: Option<Plan>,
+    /// For a worker: the agent of its conductor's plan it is started as.
+    pub agent: Option<String>,
+    /// The worker must report a verdict.
+    pub reports_verdict: bool,
+    /// Work on this worker's branch instead of a new one.
+    pub branch_of: Option<Session>,
     /// Model to run on; `None` for the harness profile's default.
     pub model: Option<String>,
     /// Environment to run in, by name. `None` takes the repositories'
@@ -125,6 +133,54 @@ fn opencode_small_model(env: &mut BTreeMap<String, String>, model: &str) {
         .unwrap_or_else(|| json!({}));
     config["small_model"] = json!(model);
     env.insert(VAR.to_string(), config.to_string());
+}
+
+/// What a conductor is told about the agents and loop its workflow declares.
+fn plan_brief(plan: &Plan) -> String {
+    let mut p = String::from(
+        "\n## Your agents\n\
+         This workflow declares the agents below. Start one by passing its name as `agent` to `hyperbeam_spawn_agent`: \
+         its standing brief, skills and permissions are already set, so `prompt` only needs what is particular to this \
+         piece of work.\n",
+    );
+    for (name, agent) in &plan.agents {
+        let mut notes = Vec::new();
+        if !agent.description.trim().is_empty() {
+            notes.push(agent.description.trim().to_string());
+        }
+        if let Some(other) = &agent.branch_of {
+            notes.push(format!("works on the branch of the latest `{other}`"));
+        }
+        if agent.verdict {
+            notes.push("reports a verdict".to_string());
+        }
+        if agent.fresh {
+            notes.push("started anew each time, never resumed".to_string());
+        }
+        p.push_str(&format!("- `{name}`{}{}\n", if notes.is_empty() { "" } else { ": " }, notes.join("; ")));
+    }
+    let Some(review_loop) = &plan.review_loop else { return p };
+    let (implement, review, rounds) = (&review_loop.implement, &review_loop.review, review_loop.max_rounds);
+    let again = match plan.agents.get(review).is_some_and(|agent| agent.fresh) {
+        true => format!("start a new `{review}`"),
+        false => format!("ask the same `{review}` to look again with `hyperbeam_message_agent`"),
+    };
+    p.push_str(&format!(
+        "\n## Your loop\n\
+         This work runs as a loop, which the platform counts and enforces:\n\
+         1. Start `{implement}` and end your turn.\n\
+         2. When it reports that its work is pushed, start `{review}`. It reviews that branch and reports a verdict, \
+         which arrives with its report.\n\
+         3. If the verdict requests changes, send the findings to the same `{implement}` with `hyperbeam_message_agent`; \
+         when it reports back, {again}.\n\
+         4. Repeat until `{review}` approves. Each verdict ends a round and there are at most {rounds}. After the last, \
+         the platform refuses to continue the loop: tell the people you work for what is unresolved with \
+         `hyperbeam_ask_user` and end your turn.\n\
+         Do not do `{implement}`'s or `{review}`'s work yourself, do not settle a requested change by deciding it does \
+         not matter, and do not report the work done before `{review}` has approved: the platform will not let the \
+         workstream move to review until then.\n",
+    ));
+    p
 }
 
 fn slug(text: &str) -> String {
@@ -413,6 +469,23 @@ impl App {
             }
         }
 
+        // A workflow whose agents could never start is better refused now
+        // than discovered by its conductor halfway through.
+        for (name, agent) in new.plan.iter().flat_map(|plan| &plan.agents) {
+            for skill in &agent.skills {
+                let exists: Option<(String,)> =
+                    sqlx::query_as("SELECT name FROM skills WHERE name = $1").bind(skill).fetch_optional(&self.db).await?;
+                if exists.is_none() {
+                    return Err(ApiError::bad(format!("agent `{name}` uses skill `{skill}`, and there is no skill of that name")));
+                }
+            }
+            if let Some(profile) = &agent.harness
+                && store::harness_by_name(&self.db, profile).await?.is_none()
+            {
+                return Err(ApiError::bad(format!("agent `{name}` uses harness `{profile}`, and there is no harness profile of that name")));
+            }
+        }
+
         if let Some(ws) = new.workstream_id {
             let found: Option<(Uuid,)> =
                 sqlx::query_as("SELECT id FROM workstreams WHERE id = $1").bind(ws).fetch_optional(&self.db).await?;
@@ -441,13 +514,17 @@ impl App {
         };
         let short = &id.simple().to_string()[24..];
         let branch_slug = slug(&title);
-        let work_branch =
-            if branch_slug.is_empty() { format!("hyperbeam/{short}") } else { format!("hyperbeam/{branch_slug}-{short}") };
+        let work_branch = match &new.branch_of {
+            Some(other) => other.work_branch.clone(),
+            None if branch_slug.is_empty() => format!("hyperbeam/{short}"),
+            None => format!("hyperbeam/{branch_slug}-{short}"),
+        };
 
         let session: Session = sqlx::query_as(&format!(
             "INSERT INTO sessions (id, workstream_id, parent_id, title, role, harness_id, created_by, workflow,
-                                   repos, skills, grants, work_branch, model, environment_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                                   repos, skills, grants, work_branch, model, environment_id,
+                                   plan, agent, reports_verdict)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
              RETURNING {}",
             store::SESSION_COLUMNS
         ))
@@ -465,6 +542,9 @@ impl App {
         .bind(&work_branch)
         .bind(&model)
         .bind(environment_id)
+        .bind(new.plan.as_ref().map(Json))
+        .bind(&new.agent)
+        .bind(new.reports_verdict)
         .fetch_one(&self.db)
         .await?;
 
@@ -867,6 +947,24 @@ impl App {
                 p.push_str(&format!(" There is no {cli} CLI and no {title} token: use the `{kind}_*` tools for {change}s, issues and comments."));
             }
             p.push('\n');
+            // A branch another agent started is that agent's work to look at.
+            let owner: Option<(String,)> = sqlx::query_as(
+                "SELECT title FROM sessions WHERE work_branch = $1 AND id <> $2 AND created_at < $3 ORDER BY created_at LIMIT 1",
+            )
+            .bind(&session.work_branch)
+            .bind(session.id)
+            .bind(session.created_at)
+            .fetch_optional(&self.db)
+            .await?;
+            if let Some((owner,)) = owner {
+                p.push_str(&format!(
+                    "\n## A shared branch\n\
+                     `{}` is the branch of “{owner}”, another agent working for the same conductor, and you are here for its work. \
+                     It pushes while you are away: run `git pull` before you start, and again each time you are asked to look. \
+                     Compare against the default branch to see what it changed. Do not push to this branch unless your brief says to.\n",
+                    session.work_branch
+                ));
+            }
         }
 
         p.push_str("\n## What you may do\n");
@@ -964,13 +1062,30 @@ impl App {
                  worker a self-contained brief: it does not see this conversation.\n\
                  - End your turn after delegating. You will be prompted again each time a worker finishes a turn, with its summary.\n\
                  - `hyperbeam_list_agents` and `hyperbeam_get_agent` show progress; `hyperbeam_message_agent` sends a follow-up; `hyperbeam_stop_agent` stops one.\n\
-                 - Workers can hold at most the permissions you hold.\n\
+                 - Workers can hold at most the permissions you hold. Pass `grants` to give one less, such as \
+                 `[\"github:read\"]` for a worker that must not change anything.\n\
+                 - To have a worker's result checked, start a second worker with `branch_of` set to the first one's id \
+                 and `verdict: true`: it checks out the same branch and ends by approving or requesting changes.\n\
                  - A worker may put a question to you. Answer with `hyperbeam_message_agent`; if the decision is not \
                  yours to make, ask the people you work for with `hyperbeam_ask_user` and pass the answer on.\n\
                  When everything is done, report the outcome with links to any pull requests.\n",
             );
+            if let Some(plan) = crate::review::plan_of(&self.db, session.id).await? {
+                p.push_str(&plan_brief(&plan));
+            }
         } else {
             p.push_str("\nWhen you finish, end with a short summary of what you did, what you verified, and anything left open.\n");
+        }
+        if session.reports_verdict {
+            p.push_str(
+                "\n## Your verdict\n\
+                 Your work here ends with a verdict, and your conductor acts on the verdict, not on your closing message. \
+                 When you have finished looking, call `hyperbeam_report_verdict` with `approve` or `request_changes` and your \
+                 findings, then end your turn. Approve only work you would be content to see shipped as it stands. When you \
+                 request changes, say what must change and where, specifically enough that another agent can act on it \
+                 without asking you, and leave out what is merely a matter of taste. Each time you are asked to look again, \
+                 report a verdict again.\n",
+            );
         }
 
         if session.launches > 1 {
@@ -1200,6 +1315,12 @@ impl App {
                     "\n\nIt is still waiting for an answer to its question: “{}”. Answer with `hyperbeam_message_agent`.",
                     clip(&question.text, 500)
                 ));
+            }
+            if session.parent_id.is_some() {
+                match self.verdict_report(&session, session.question.is_some()).await {
+                    Ok(verdict) => report.push_str(&verdict),
+                    Err(err) => tracing::warn!("could not read the verdict of {session_id}: {err:#}"),
+                }
             }
             self.notify_parent(&session, &format!("{outcome} ({stop_reason}). Its report:\n\n{report}")).await;
         }

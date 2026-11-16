@@ -179,6 +179,10 @@ pub struct Session {
     pub environment_id: Option<Uuid>,
     pub created_by: Uuid,
     pub workflow: Option<String>,
+    /// The agent of its conductor's workflow this worker was started as.
+    pub agent: Option<String>,
+    /// Its work ends with a verdict, given with `hyperbeam_report_verdict`.
+    pub reports_verdict: bool,
     pub repos: Json<Vec<String>>,
     pub skills: Json<Vec<String>>,
     pub grants: Json<GrantSet>,
@@ -200,7 +204,7 @@ pub struct Session {
 }
 
 pub const SESSION_COLUMNS: &str = "id, workstream_id, parent_id, title, role, status, harness_id, environment_id, created_by, \
-     workflow, repos, skills, grants, work_branch, model, links, headline, summary, error, question, event_seq, launches, \
+     workflow, agent, reports_verdict, repos, skills, grants, work_branch, model, links, headline, summary, error, question, event_seq, launches, \
      created_at, started_at, ended_at, last_activity_at";
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]

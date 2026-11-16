@@ -113,6 +113,9 @@ export interface Session {
   environment_id: string | null;
   created_by: string;
   workflow: string | null;
+  /** The agent of its conductor's workflow this worker was started as. */
+  agent: string | null;
+  reports_verdict: boolean;
   repos: string[];
   skills: string[];
   grants: string[];
@@ -129,6 +132,27 @@ export interface Session {
   started_at: string | null;
   ended_at: string | null;
   last_activity_at: string;
+}
+
+/** What a reviewing agent concluded. */
+export interface Verdict {
+  id: string;
+  session_id: string;
+  agent: string | null;
+  verdict: "approve" | "request_changes";
+  findings: string;
+  created_at: string;
+}
+
+/** Where a conductor's implement-and-review loop stands. */
+export interface ReviewLoop {
+  implement: string;
+  review: string;
+  max_rounds: number;
+  /** Rounds finished: one per verdict. */
+  rounds: number;
+  standing: "running" | "approved" | "exhausted";
+  verdicts: Verdict[];
 }
 
 export type WorkstreamStatus = "scoping" | "building" | "review" | "done" | "archived";
@@ -392,6 +416,9 @@ export interface Workflow {
     skills: string[];
     grants: string[];
     inputs: WorkflowInput[];
+    /** Named workers its conductor can start. */
+    agents: Record<string, { description: string; prompt: string }>;
+    loop: { implement: string; review: string; max_rounds: number } | null;
     prompt: string;
   } | null;
 }

@@ -219,6 +219,11 @@ prompt: |
   Open a pull request per repository and report the links.
 ```
 
+A conductor workflow can also declare named `agents`, each with its own brief and permissions, and a
+`loop` that runs an implementer and a reviewer in turn until the reviewer approves. Hyperbeam counts the
+rounds, stops the loop at `max_rounds`, and does not let the work move to review before an approval. See
+[`examples/build-and-review.workflow.yaml`](examples/build-and-review.workflow.yaml).
+
 Skills use the open `SKILL.md` format and are installed into each sandbox at `.claude/skills/` and
 `.agents/skills/`.
 

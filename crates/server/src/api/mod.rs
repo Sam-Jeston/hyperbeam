@@ -104,6 +104,7 @@ pub fn router() -> Router<App> {
         .route("/sessions/{id}/answer", post(work::answer_question))
         .route("/sessions/{id}/cancel", post(work::cancel_session))
         .route("/sessions/{id}/stop", post(work::stop_session))
+        .route("/sessions/{id}/loop/rounds", post(work::allow_rounds))
         .route("/activity", get(work::list_activity))
         .route("/audit", get(work::list_audit))
         .route("/cluster", get(cluster::get))

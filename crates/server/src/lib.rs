@@ -17,6 +17,7 @@ pub mod knowledge;
 pub mod masterkey;
 pub mod notify;
 pub mod probe;
+pub mod review;
 pub mod sandbox;
 pub mod sessions;
 pub mod store;

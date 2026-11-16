@@ -1,7 +1,7 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import {
   ArrowDown, ChevronRight, CircleCheck, CircleStop, CircleX, ExternalLink, FilePen, FileText, FolderGit2, Globe, Hand, Lightbulb,
-  Loader2, MessageCircleQuestion, Search, SendHorizontal, ShieldCheck, ShieldX, Terminal, Trash2, Wrench,
+  Loader2, MessageCircleQuestion, MessageSquareWarning, Search, SendHorizontal, ShieldCheck, ShieldX, Terminal, Trash2, Wrench,
 } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BrandMark } from "../components/ui/brand";
@@ -9,7 +9,7 @@ import { Button } from "../components/ui/button";
 import { confirm } from "../components/ui/dialog";
 import { Kbd } from "../components/ui/input";
 import { Badge, Card, KeyValues, Notice, Panel, Skeleton } from "../components/ui/surface";
-import { api, isLive, type Question, type Session, type SessionEvent } from "../lib/api";
+import { api, isLive, type Question, type ReviewLoop, type Session, type SessionEvent, type Verdict } from "../lib/api";
 import { markRead, useStore } from "../lib/store";
 import { A, Avatar, clock, ErrorNote, Markdown, Page, PageHeader, SmartLink, StatusBadge, Time, useAction, useDocumentTitle, useLoad, useTick } from "../lib/ui";
 import { cn } from "../lib/utils";
@@ -20,6 +20,8 @@ interface Detail {
   harness: { name: string; title: string; model: string | null } | null;
   environment: { name: string; image: string } | null;
   children: Session[];
+  loop: ReviewLoop | null;
+  verdicts: Verdict[];
   parent: { id: string; title: string } | null;
   workstream: { id: string; title: string } | null;
   can_drive: boolean;
@@ -147,7 +149,7 @@ export function SessionPage({ id }: { id: string }) {
   const users = useStore((s) => s.users);
   const liveSession = useStore((s) => s.sessions[id]);
   const allSessions = useStore((s) => s.sessions);
-  const { data, error } = useLoad<Detail>(() => api.get(`/sessions/${id}`), [id]);
+  const { data, error, reload, set } = useLoad<Detail>(() => api.get(`/sessions/${id}`), [id]);
   const { events, caughtUp } = useEvents(id);
   const { items, plan } = useMemo(() => fold(events), [events]);
   const action = useAction();
@@ -156,6 +158,15 @@ export function SessionPage({ id }: { id: string }) {
   const [behind, setBehind] = useState(false);
   const session = liveSession ?? data?.session;
   useDocumentTitle(session?.title);
+
+  // Verdicts are not part of the live session, so fetch them again whenever
+  // a session that gives or gathers them is republished.
+  const judged = !!data && (data.loop !== null || data.session.reports_verdict);
+  const published = useRef(liveSession);
+  useEffect(() => {
+    if (published.current !== liveSession && judged) reload();
+    published.current = liveSession;
+  }, [liveSession, judged]);
 
   // Opening an agent's page is reading what it wanted to tell you.
   useEffect(() => {
@@ -302,6 +313,12 @@ export function SessionPage({ id }: { id: string }) {
 
         <aside className="grid gap-4 pb-8 lg:sticky lg:top-6">
           {plan && plan.length > 0 && <PlanPanel plan={plan} />}
+          {data.loop && <LoopPanel sessionId={id} loop={data.loop} sessions={children} canDrive={data.can_drive} onChange={(loop) => set({ ...data, loop })} />}
+          {!data.loop && data.verdicts.filter((v) => v.session_id === id).map((v) => (
+            <Panel key={v.id} title="Verdict" action={<VerdictBadge verdict={v} />}>
+              <Markdown text={v.findings} className="text-[13px]" />
+            </Panel>
+          ))}
           <Panel title="About">
             <KeyValues
               rows={[
@@ -310,6 +327,7 @@ export function SessionPage({ id }: { id: string }) {
                 ["Model", data.harness?.model ?? <span className="text-muted">Harness default</span>],
                 ...(data.environment ? [["Environment", <span title={data.environment.image}>{data.environment.name}</span>] as [ReactNode, ReactNode]] : []),
                 ...(session.workflow ? [["Workflow", session.workflow] as [ReactNode, ReactNode]] : []),
+                ...(session.agent ? [["Started as", <span className="font-mono text-[12px]">{session.agent}</span>] as [ReactNode, ReactNode]] : []),
                 ["Created", <Time iso={session.created_at} />],
                 ...(session.repos.length > 0
                   ? [
@@ -441,6 +459,62 @@ function MessageComposer({ sessionId, question, placeholder, onSent }: { session
       </div>
       <ErrorNote error={action.error} />
     </div>
+  );
+}
+
+function VerdictBadge({ verdict }: { verdict: Verdict }) {
+  return verdict.verdict === "approve" ? <Badge tone="run"><CircleCheck /> Approved</Badge> : <Badge tone="wait"><MessageSquareWarning /> Changes requested</Badge>;
+}
+
+/** A conductor's implement-and-review loop: the round it is in and what each review concluded. */
+function LoopPanel(props: { sessionId: string; loop: ReviewLoop; sessions: Session[]; canDrive: boolean; onChange: (loop: ReviewLoop) => void }) {
+  const { loop } = props;
+  const action = useAction();
+  const more = 2;
+  const allow = () =>
+    void action.run(async () => props.onChange((await api.post<{ loop: ReviewLoop }>(`/sessions/${props.sessionId}/loop/rounds`, { rounds: more })).loop), { toastError: true });
+  const round = Math.min(loop.rounds + 1, loop.max_rounds);
+  return (
+    <Panel
+      title="Loop"
+      action={<span className="text-[12px] tabular-nums text-muted">{loop.standing === "running" ? `Round ${round} of ${loop.max_rounds}` : `${loop.rounds} of ${loop.max_rounds} rounds`}</span>}
+    >
+      <p className="mb-3 text-[13px] leading-snug text-muted">
+        <span className="font-mono text-[12px] text-foreground">{loop.implement}</span> builds and <span className="font-mono text-[12px] text-foreground">{loop.review}</span> reviews, until the review approves.
+      </p>
+      {loop.standing === "approved" && <Notice tone="success" className="mb-3">Approved in round {loop.rounds}.</Notice>}
+      {loop.standing === "exhausted" && (
+        <Notice
+          tone="warning"
+          className="mb-3"
+          title="Out of rounds"
+          action={props.canDrive && <Button size="sm" loading={action.busy} onClick={allow}>Allow {more} more</Button>}
+        >
+          The review has not approved, so the loop has stopped.
+        </Notice>
+      )}
+      {loop.verdicts.length === 0 ? (
+        <p className="text-[13px] text-muted">No review yet.</p>
+      ) : (
+        <ol className="grid gap-2.5 text-[13px]">
+          {loop.verdicts.map((v, i) => {
+            const reviewer = props.sessions.find((s) => s.id === v.session_id);
+            return (
+              <li key={v.id} className="flex items-start gap-2">
+                {v.verdict === "approve" ? <CircleCheck className="mt-0.5 size-4 shrink-0 text-run" /> : <MessageSquareWarning className="mt-0.5 size-4 shrink-0 text-wait" />}
+                <div className="grid min-w-0 gap-0.5">
+                  <div className="flex items-baseline gap-1.5">
+                    <A href={`/s/${v.session_id}`} className="font-medium hover:underline" title={reviewer?.title}>Round {i + 1}</A>
+                    <span className="text-muted">{v.verdict === "approve" ? "approved" : "changes requested"}</span>
+                  </div>
+                  <div className="line-clamp-3 text-[12.5px] leading-snug text-muted" title={v.findings}>{v.findings}</div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </Panel>
   );
 }
 

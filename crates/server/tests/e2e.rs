@@ -875,6 +875,241 @@ async fn conductor_delegates_and_hears_back() {
     assert!(tool_output(&events, "hyperbeam_spawn_agent").contains("Denied"));
 }
 
+/// Everything tools have returned in a session so far.
+fn all_tool_output(events: &[Value]) -> String {
+    events.iter().filter(|e| e["kind"] == "tool_call_update").filter_map(|e| e["data"]["content"][0]["content"]["text"].as_str()).collect::<Vec<_>>().join("\n")
+}
+
+/// What the platform has told a session, such as a worker's report.
+fn told(events: &[Value]) -> String {
+    events
+        .iter()
+        .filter(|e| e["kind"] == "user_message" && e["data"]["author"] == "Hyperbeam")
+        .filter_map(|e| e["data"]["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+impl Client<'_> {
+    /// Wait until what `read` makes of the session's events contains `needle`.
+    async fn wait_seen(&self, id: &str, read: fn(&[Value]) -> String, needle: &str) -> Vec<Value> {
+        let mut events = Vec::new();
+        for _ in 0..300 {
+            events = self.events(id).await;
+            if read(&events).contains(needle) {
+                return events;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("session {id} never showed {needle:?}: {}\n{}", told(&events), all_tool_output(&events));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workflow_loop_runs_until_the_reviewer_approves() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    h.connect_github(&owner).await;
+    let mia = h.member(&owner, "mia@example.com", &[]).await;
+
+    let yaml = r#"
+name: build-and-review
+role: conductor
+harness: scripted
+repos: [acme/demo]
+grants: [github:write, github:open_pr]
+inputs:
+  - name: goal
+agents:
+  implementer:
+    description: Builds it
+    prompt: |
+      Build {{goal}}.
+      !tools
+      !sh cd demo && echo one > feature.txt && git add . && git commit -qm "Add feature" && git push -q origin HEAD 2>&1 && echo PUSHED
+      !say Pushed the feature.
+  reviewer:
+    grants: [github:read]
+    fresh: true
+    prompt: |
+      Review {{goal}}.
+      !tools
+      !sh cd demo && git log --format=%s -1 && cat feature.txt
+      !sh cd demo && git push origin HEAD:refs/heads/sneaky 2>&1; echo "exit=$?"
+loop:
+  implement: implementer
+  review: reviewer
+  max_rounds: 2
+prompt: |
+  Goal: {{goal}}
+  !mcp hyperbeam_spawn_agent {"agent": "reviewer"}
+  !mcp hyperbeam_spawn_agent {"agent": "critic"}
+  !mcp hyperbeam_spawn_agent {"agent": "implementer"}
+"#;
+    // A workflow whose loop could not run is refused when it is saved.
+    let (status, body) = owner.call(Method::POST, "/workflows", Some(json!({ "yaml": yaml.replace("review: reviewer", "review: critic") }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("no agent of that name"), "{body}");
+    let workflow = owner.post("/workflows", json!({ "yaml": yaml })).await;
+    let listed = owner.get("/workflows").await;
+    assert_eq!(listed["workflows"][0]["spec"]["loop"]["max_rounds"], 2);
+    let run = format!("/workflows/{}/run", workflow["workflow"]["id"].as_str().unwrap());
+    let created = owner.post(&run, json!({ "inputs": { "goal": "the feature" }, "new_workstream": "The feature" })).await;
+    let id = created["session"]["id"].as_str().unwrap();
+    let conductor = &owner;
+    let say = |text: String| async move { conductor.post(&format!("/sessions/{id}/messages"), json!({ "text": text })).await };
+    let review = |verdict: &str, findings: &str| {
+        format!(r#"!mcp hyperbeam_spawn_agent {{"agent": "reviewer", "prompt": "!mcp hyperbeam_report_verdict {{\"verdict\": \"{verdict}\", \"findings\": \"{findings}\"}}"}}"#)
+    };
+
+    // The reviewer has nothing to review until an implementer exists, and
+    // only declared agents can be started by name.
+    let events = owner.wait_seen(id, told, "Pushed the feature.").await;
+    let output = all_tool_output(&events);
+    assert!(output.contains("you have not started a `implementer` yet"), "{output}");
+    assert!(output.contains("no agent named `critic`; this workflow declares `implementer`, `reviewer`"), "{output}");
+    let detail = owner.get(&format!("/sessions/{id}")).await;
+    assert_eq!(detail["loop"]["standing"], "running");
+    assert_eq!(detail["loop"]["rounds"], 0);
+    let implementer = detail["children"][0].clone();
+    let implementer_id = implementer["id"].as_str().unwrap();
+    assert_eq!((&implementer["title"], &implementer["agent"]), (&json!("implementer"), &json!("implementer")));
+    assert_eq!(implementer["repos"], json!(["acme/demo"]));
+    let branch = implementer["work_branch"].as_str().unwrap();
+    let built = owner.events(implementer_id).await;
+    // Its brief is the workflow's, with the input filled in.
+    assert!(text_of(&built, "user_message").starts_with("Build the feature."));
+    assert!(!tool_output(&built, "tools/list").contains("hyperbeam_report_verdict"));
+
+    // Round 1: the reviewer reads the implementer's branch, cannot change
+    // it, and its verdict reaches the conductor with what to do next.
+    say(review("request_changes", "feature.txt should say two")).await;
+    let events = owner.wait_seen(id, told, "REQUEST CHANGES (round 1 of 2)").await;
+    let report = told(&events);
+    assert!(report.contains("feature.txt should say two"), "{report}");
+    assert!(report.contains("send these findings to `implementer`") && report.contains("start a new `reviewer`"), "{report}");
+    let detail = owner.get(&format!("/sessions/{id}")).await;
+    let first = detail["children"][1].clone();
+    let first_id = first["id"].as_str().unwrap();
+    assert_eq!(first["title"], "reviewer (round 1)");
+    assert_eq!(first["work_branch"], branch);
+    assert_eq!(first["grants"], json!(["github:read"]));
+    assert_eq!(first["reports_verdict"], true);
+    let reviewed = owner.events(first_id).await;
+    assert!(tool_output(&reviewed, "tools/list").contains("hyperbeam_report_verdict"));
+    assert_eq!(tool_output(&reviewed, "git log"), "Add feature\none");
+    let sneaky = tool_output(&reviewed, "sneaky");
+    assert!(sneaky.contains("403") && !sneaky.contains("exit=0"), "{sneaky}");
+    assert_eq!((&detail["loop"]["rounds"], &detail["loop"]["standing"]), (&json!(1), &json!("running")));
+    assert_eq!(detail["loop"]["verdicts"][0]["verdict"], "request_changes");
+    assert_eq!(detail["verdicts"][0]["session_id"], first_id);
+
+    // Unapproved work cannot be called ready, and a fresh reviewer is not resumed.
+    say(format!(
+        "!mcp hyperbeam_update_workstream {{\"status\": \"review\"}}\n!mcp hyperbeam_message_agent {{\"id\": \"{first_id}\", \"text\": \"Look again.\"}}"
+    ))
+    .await;
+    let events = owner.wait_seen(id, all_tool_output, "started anew each time").await;
+    assert!(all_tool_output(&events).contains("`reviewer` has not approved it (round 1 of 2)"));
+    let workstream = format!("/workstreams/{}", created["session"]["workstream_id"].as_str().unwrap());
+    assert_ne!(owner.get(&workstream).await["workstream"]["status"], "review");
+
+    // The implementer fixes it in the sandbox it already has.
+    say(format!(
+        "!mcp hyperbeam_message_agent {{\"id\": \"{implementer_id}\", \"text\": \"!sh cd demo && echo two > feature.txt && git commit -qam Fix && git push -q origin HEAD 2>&1 && echo FIXED\"}}"
+    ))
+    .await;
+    owner.wait_seen(implementer_id, all_tool_output, "FIXED").await;
+    owner.wait_turns(implementer_id, 2).await;
+
+    // Round 2 is the last allowed: a new reviewer sees the fix, still
+    // objects, and the platform stops the loop.
+    say(review("request_changes", "It needs a test")).await;
+    let events = owner.wait_seen(id, told, "REQUEST CHANGES (round 2 of 2)").await;
+    assert!(told(&events).contains("the last of the loop's 2 rounds"), "{}", told(&events));
+    let detail = owner.get(&format!("/sessions/{id}")).await;
+    assert_eq!(detail["loop"]["standing"], "exhausted");
+    let second_id = detail["children"][2]["id"].as_str().unwrap();
+    assert_ne!(second_id, first_id);
+    assert_eq!(tool_output(&owner.events(second_id).await, "git log"), "Fix\ntwo");
+    say(format!("{}\n!mcp hyperbeam_message_agent {{\"id\": \"{implementer_id}\", \"text\": \"Add a test.\"}}\n!say Stopped.", review("approve", "Fine")))
+        .await;
+    let events = owner.wait_seen(id, |events| text_of(events, "agent_message"), "Stopped.").await;
+    assert_eq!(all_tool_output(&events).matches("used all 2 of its rounds").count(), 2);
+    assert_eq!(owner.get(&format!("/sessions/{id}")).await["children"].as_array().unwrap().len(), 3);
+
+    // Someone who may direct the conductor allows more, and it is told.
+    let rounds = format!("/sessions/{id}/loop/rounds");
+    assert_eq!(mia.call(Method::POST, &rounds, Some(json!({ "rounds": 1 }))).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(owner.call(Method::POST, &rounds, Some(json!({ "rounds": 500 }))).await.0, StatusCode::BAD_REQUEST);
+    let allowed = owner.post(&rounds, json!({ "rounds": 1 })).await;
+    assert_eq!((&allowed["loop"]["max_rounds"], &allowed["loop"]["standing"]), (&json!(3), &json!("running")));
+    owner.wait_seen(id, |events| text_of(events, "user_message"), "up to 3 in all").await;
+
+    // Round 3: approval ends the loop and lets the work move on.
+    say(review("approve", "Checked the diff and the tests")).await;
+    let events = owner.wait_seen(id, told, "APPROVE (round 3 of 3)").await;
+    assert!(told(&events).contains("The loop is complete."));
+    let detail = owner.get(&format!("/sessions/{id}")).await;
+    assert_eq!((&detail["loop"]["rounds"], &detail["loop"]["standing"]), (&json!(3), &json!("approved")));
+    say("!mcp hyperbeam_update_workstream {\"status\": \"review\"}".to_string()).await;
+    owner.wait_seen(id, all_tool_output, "status → review").await;
+    assert_eq!(owner.get(&workstream).await["workstream"]["status"], "review");
+    assert!(!h.github.branches().contains(&"sneaky".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_conductor_can_start_a_read_only_reviewer_without_a_workflow() {
+    let Some(h) = Harness::start().await else { return };
+    let owner = h.owner().await;
+    h.connect_github(&owner).await;
+    let prompt = r#"Build and check it.
+!mcp hyperbeam_spawn_agent {"title": "Build", "repos": ["acme/demo"], "prompt": "!sh cd demo && echo one > feature.txt && git add . && git commit -qm Feature && git push -q origin HEAD 2>&1\n!say Built."}"#;
+    let created = owner.post("/sessions", json!({ "prompt": prompt, "harness": "scripted", "role": "conductor", "repos": ["acme/demo"] })).await;
+    let id = created["session"]["id"].as_str().unwrap();
+    owner.wait_seen(id, told, "Built.").await;
+    let builder = owner.get(&format!("/sessions/{id}")).await["children"][0].clone();
+    let builder_id = builder["id"].as_str().unwrap();
+
+    // Grants narrow but never widen, the branch is the builder's, and a
+    // review that ends without a verdict is reported as such.
+    let spawn = format!(
+        r#"!mcp hyperbeam_spawn_agent {{"title": "Check", "branch_of": "{builder_id}", "grants": ["github:read"], "verdict": true, "prompt": "!sh cd demo && cat feature.txt\n!say Looks fine."}}
+!mcp hyperbeam_spawn_agent {{"title": "Nope", "grants": ["github:root"], "prompt": "x"}}
+!mcp hyperbeam_spawn_agent {{"title": "Nope", "agent": "reviewer", "prompt": "x"}}"#
+    );
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": spawn })).await;
+    let events = owner.wait_seen(id, told, "without reporting a verdict").await;
+    let output = all_tool_output(&events);
+    assert!(output.contains("which it shares with “Build”"), "{output}");
+    assert!(output.contains("in `grants`:") && output.contains("declares no agents"), "{output}");
+    let detail = owner.get(&format!("/sessions/{id}")).await;
+    assert_eq!(detail["loop"], Value::Null);
+    let checker = detail["children"][1].clone();
+    let checker_id = checker["id"].as_str().unwrap();
+    assert_eq!(checker["work_branch"], builder["work_branch"]);
+    assert_eq!(checker["repos"], json!(["acme/demo"]));
+    assert_eq!(checker["grants"], json!(["github:read"]));
+    assert_eq!(tool_output(&owner.events(checker_id).await, "cat feature.txt"), "one");
+
+    // Asked for one, it gives it; a later verdict in the same turn replaces an earlier.
+    let ask = format!(
+        r#"!mcp hyperbeam_message_agent {{"id": "{checker_id}", "text": "!mcp hyperbeam_report_verdict {{\"verdict\": \"request_changes\"}}\n!mcp hyperbeam_report_verdict {{\"verdict\": \"request_changes\", \"findings\": \"No.\"}}\n!mcp hyperbeam_report_verdict {{\"verdict\": \"approve\", \"findings\": \"On reflection, fine.\"}}"}}"#
+    );
+    owner.post(&format!("/sessions/{id}/messages"), json!({ "text": ask })).await;
+    let events = owner.wait_seen(id, told, "Its verdict: APPROVE.").await;
+    assert!(told(&events).contains("On reflection, fine.") && !told(&events).contains("REQUEST CHANGES"));
+    assert!(all_tool_output(&owner.events(checker_id).await).contains("say what must change"));
+    let verdicts = owner.get(&format!("/sessions/{checker_id}")).await["verdicts"].clone();
+    assert_eq!(verdicts.as_array().unwrap().len(), 1);
+    assert_eq!(verdicts[0]["verdict"], "approve");
+
+    // A worker that owes no verdict cannot give one.
+    owner.post(&format!("/sessions/{builder_id}/messages"), json!({ "text": "!mcp hyperbeam_report_verdict {\"verdict\": \"approve\"}" })).await;
+    let events = owner.wait_turns(builder_id, 2).await;
+    assert!(tool_output(&events, "hyperbeam_report_verdict").contains("was not asked for a verdict"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn agents_ask_questions_and_people_answer() {
     let Some(h) = Harness::start().await else { return };

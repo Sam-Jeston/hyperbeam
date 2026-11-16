@@ -60,8 +60,83 @@ pub struct WorkflowSpec {
     pub grants: GrantSet,
     #[serde(default)]
     pub inputs: Vec<WorkflowInput>,
+    /// Named agents a conductor starts by name, each with its own brief,
+    /// skills and permissions.
+    #[serde(default)]
+    pub agents: BTreeMap<String, AgentSpec>,
+    /// An implement-and-review loop over two of those agents, which the
+    /// platform counts and bounds.
+    #[serde(default, rename = "loop")]
+    pub review_loop: Option<LoopSpec>,
     /// Prompt template. `{{name}}` is replaced by the input of that name.
     pub prompt: String,
+}
+
+/// A worker a conductor can start by name.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSpec {
+    /// One line telling the conductor what this agent is for.
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub harness: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Repositories it checks out. Defaults to those of the agent whose
+    /// branch it shares, or else all of the workflow's.
+    #[serde(default)]
+    pub repos: Vec<String>,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    /// The most this agent may do; absent means whatever its conductor may.
+    #[serde(default)]
+    pub grants: Option<GrantSet>,
+    /// Work on the branch of the latest agent started under this name,
+    /// instead of a branch of its own.
+    #[serde(default)]
+    pub branch_of: Option<String>,
+    /// Start a new agent each time instead of resuming the last one, so it
+    /// is not anchored on what it concluded before.
+    #[serde(default)]
+    pub fresh: bool,
+    /// It must report a verdict (approve, or request changes) before its
+    /// work counts as finished.
+    #[serde(default)]
+    pub verdict: bool,
+    /// Its standing brief. `{{name}}` is replaced by the workflow input of
+    /// that name; the conductor adds the specifics of each piece of work.
+    pub prompt: String,
+}
+
+/// Implement, review, and repeat until the reviewer approves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoopSpec {
+    /// The agent that does the work.
+    pub implement: String,
+    /// The agent that reviews it. It reports a verdict, and each verdict
+    /// ends a round.
+    pub review: String,
+    /// Rounds allowed before the platform stops the loop.
+    #[serde(default = "default_rounds")]
+    pub max_rounds: u32,
+}
+
+fn default_rounds() -> u32 {
+    5
+}
+
+pub const MAX_LOOP_ROUNDS: u32 = 50;
+
+/// What a conductor started from a workflow carries with it: the workflow's
+/// agents with their briefs filled in, and its loop.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Plan {
+    #[serde(default)]
+    pub agents: BTreeMap<String, AgentSpec>,
+    #[serde(default, rename = "loop")]
+    pub review_loop: Option<LoopSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -96,6 +171,20 @@ pub enum WorkflowError {
     MissingInput(String),
     #[error("unknown input `{0}`")]
     UnknownInput(String),
+    #[error("agent name `{0}` must be lowercase letters, digits and dashes")]
+    BadAgentName(String),
+    #[error("`agents` and `loop` need `role: conductor`: only a conductor starts other agents")]
+    NeedsConductor,
+    #[error("agent `{0}` lists repository `{1}`, which is not among the workflow's `repos`")]
+    AgentRepo(String, String),
+    #[error("{0} names agent `{1}`, but no agent of that name is declared under `agents`")]
+    UnknownAgent(String, String),
+    #[error("agent `{0}` cannot share its own branch")]
+    OwnBranch(String),
+    #[error("a loop needs two different agents to implement and to review")]
+    LoopSameAgent,
+    #[error("loop max_rounds must be between 1 and {MAX_LOOP_ROUNDS}")]
+    BadRounds,
 }
 
 pub fn valid_slug(s: &str) -> bool {
@@ -142,22 +231,85 @@ impl WorkflowSpec {
                 return Err(WorkflowError::DuplicateInput(input.name.clone()));
             }
         }
-        for name in placeholders(&self.prompt) {
+        let templates = std::iter::once(&self.prompt).chain(self.agents.values().map(|agent| &agent.prompt));
+        for name in templates.flat_map(|template| placeholders(template)) {
             if !seen.contains(name.as_str()) {
                 return Err(WorkflowError::UndeclaredInput(name));
+            }
+        }
+
+        if self.role != SessionRole::Conductor && (!self.agents.is_empty() || self.review_loop.is_some()) {
+            return Err(WorkflowError::NeedsConductor);
+        }
+        let declared = |what: String, name: &str| match self.agents.contains_key(name) {
+            true => Ok(()),
+            false => Err(WorkflowError::UnknownAgent(what, name.to_string())),
+        };
+        for (name, agent) in &self.agents {
+            if !valid_slug(name) {
+                return Err(WorkflowError::BadAgentName(name.clone()));
+            }
+            for repo in &agent.repos {
+                if !self.repos.iter().any(|r| r.eq_ignore_ascii_case(repo)) {
+                    return Err(WorkflowError::AgentRepo(name.clone(), repo.clone()));
+                }
+            }
+            if let Some(source) = &agent.branch_of {
+                if source == name {
+                    return Err(WorkflowError::OwnBranch(name.clone()));
+                }
+                declared(format!("agent `{name}`'s branch_of"), source)?;
+            }
+        }
+        if let Some(review_loop) = &self.review_loop {
+            declared("loop.implement".into(), &review_loop.implement)?;
+            declared("loop.review".into(), &review_loop.review)?;
+            if review_loop.implement == review_loop.review {
+                return Err(WorkflowError::LoopSameAgent);
+            }
+            if !(1..=MAX_LOOP_ROUNDS).contains(&review_loop.max_rounds) {
+                return Err(WorkflowError::BadRounds);
             }
         }
         Ok(())
     }
 
+    /// The agents and loop a conductor started from this workflow works
+    /// with, briefs filled in. `None` when the workflow declares neither.
+    ///
+    /// A loop's reviewer always reports a verdict, and reviews the
+    /// implementer's branch unless it names another.
+    pub fn plan(&self, values: &BTreeMap<String, String>) -> Result<Option<Plan>, WorkflowError> {
+        if self.agents.is_empty() {
+            return Ok(None);
+        }
+        let resolved = self.resolve(values)?;
+        let mut agents = self.agents.clone();
+        for agent in agents.values_mut() {
+            agent.prompt = fill(&agent.prompt, &resolved);
+        }
+        if let Some(review_loop) = &self.review_loop
+            && let Some(reviewer) = agents.get_mut(&review_loop.review)
+        {
+            reviewer.verdict = true;
+            reviewer.branch_of.get_or_insert_with(|| review_loop.implement.clone());
+        }
+        Ok(Some(Plan { agents, review_loop: self.review_loop.clone() }))
+    }
+
     /// Fill the prompt template.
     pub fn render(&self, values: &BTreeMap<String, String>) -> Result<String, WorkflowError> {
+        Ok(fill(&self.prompt, &self.resolve(values)?))
+    }
+
+    /// The value of every declared input, given what was supplied.
+    fn resolve(&self, values: &BTreeMap<String, String>) -> Result<BTreeMap<String, String>, WorkflowError> {
         for key in values.keys() {
             if !self.inputs.iter().any(|i| &i.name == key) {
                 return Err(WorkflowError::UnknownInput(key.clone()));
             }
         }
-        let mut resolved: BTreeMap<&str, String> = BTreeMap::new();
+        let mut resolved = BTreeMap::new();
         for input in &self.inputs {
             let value = values
                 .get(&input.name)
@@ -169,24 +321,29 @@ impl WorkflowSpec {
                 None if input.required => return Err(WorkflowError::MissingInput(input.name.clone())),
                 None => String::new(),
             };
-            resolved.insert(&input.name, value);
+            resolved.insert(input.name.clone(), value);
         }
-        // Single pass, so braces inside a substituted value are never expanded.
-        let mut out = String::with_capacity(self.prompt.len());
-        let mut rest = self.prompt.as_str();
-        while let Some(start) = rest.find("{{") {
-            let after = &rest[start + 2..];
-            let Some(end) = after.find("}}") else { break };
-            out.push_str(&rest[..start]);
-            match resolved.get(after[..end].trim()) {
-                Some(value) => out.push_str(value),
-                None => out.push_str(&rest[start..start + 2 + end + 2]),
-            }
-            rest = &after[end + 2..];
-        }
-        out.push_str(rest);
-        Ok(out)
+        Ok(resolved)
     }
+}
+
+/// Replace each `{{name}}` with its value. Single pass, so braces inside a
+/// substituted value are never expanded.
+fn fill(template: &str, resolved: &BTreeMap<String, String>) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("}}") else { break };
+        out.push_str(&rest[..start]);
+        match resolved.get(after[..end].trim()) {
+            Some(value) => out.push_str(value),
+            None => out.push_str(&rest[start..start + 2 + end + 2]),
+        }
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Names inside `{{ }}` in a template, in order of appearance.
@@ -269,6 +426,71 @@ prompt: |
             WorkflowSpec::from_yaml("name: a\nprompt: hi\ngrants: [github:root]\n"),
             Err(WorkflowError::Yaml(_))
         ));
+    }
+
+    const LOOP: &str = r#"
+name: build-and-review
+role: conductor
+repos: [acme/api]
+grants: [github:write, github:open_pr]
+inputs:
+  - name: goal
+agents:
+  implementer:
+    prompt: "Implement: {{goal}}"
+  reviewer:
+    grants: [github:read]
+    fresh: true
+    prompt: "Review against: {{goal}}"
+loop:
+  implement: implementer
+  review: reviewer
+  max_rounds: 3
+prompt: "Goal: {{goal}}"
+"#;
+
+    #[test]
+    fn a_loop_fills_in_its_agents() {
+        let wf = WorkflowSpec::from_yaml(LOOP).unwrap();
+        let mut values = BTreeMap::new();
+        values.insert("goal".to_string(), "dark mode".to_string());
+        let plan = wf.plan(&values).unwrap().unwrap();
+        assert_eq!(plan.agents["implementer"].prompt, "Implement: dark mode");
+        let reviewer = &plan.agents["reviewer"];
+        assert_eq!(reviewer.prompt, "Review against: dark mode");
+        // The loop's reviewer reports a verdict on the implementer's branch.
+        assert!(reviewer.verdict && reviewer.fresh);
+        assert_eq!(reviewer.branch_of.as_deref(), Some("implementer"));
+        assert!(!reviewer.grants.as_ref().unwrap().has(&Grant::GITHUB_WRITE));
+        assert_eq!(plan.review_loop.unwrap().max_rounds, 3);
+        // It survives being stored with the session.
+        let stored = serde_json::to_value(wf.plan(&values).unwrap().unwrap()).unwrap();
+        assert_eq!(serde_json::from_value::<Plan>(stored).unwrap().agents.len(), 2);
+
+        assert_eq!(WorkflowSpec::from_yaml(YAML).unwrap().plan(&values_for("feature")).unwrap(), None);
+    }
+
+    fn values_for(name: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([(name.to_string(), "x".to_string())])
+    }
+
+    #[test]
+    fn rejects_loops_that_cannot_run() {
+        let err = |yaml: String| WorkflowSpec::from_yaml(&yaml).unwrap_err();
+        assert_eq!(err(LOOP.replace("role: conductor", "role: worker")), WorkflowError::NeedsConductor);
+        assert_eq!(
+            err(LOOP.replace("review: reviewer", "review: critic")),
+            WorkflowError::UnknownAgent("loop.review".into(), "critic".into())
+        );
+        assert_eq!(err(LOOP.replace("review: reviewer", "review: implementer")), WorkflowError::LoopSameAgent);
+        assert_eq!(err(LOOP.replace("max_rounds: 3", "max_rounds: 0")), WorkflowError::BadRounds);
+        assert_eq!(err(LOOP.replace("Review against: {{goal}}", "Review {{nope}}")), WorkflowError::UndeclaredInput("nope".into()));
+        assert_eq!(
+            err(LOOP.replace("fresh: true", "repos: [acme/web]")),
+            WorkflowError::AgentRepo("reviewer".into(), "acme/web".into())
+        );
+        assert_eq!(err(LOOP.replace("fresh: true", "branch_of: reviewer")), WorkflowError::OwnBranch("reviewer".into()));
+        assert_eq!(err(LOOP.replace("  reviewer:", "  Reviewer:").replace("review: reviewer", "review: Reviewer")), WorkflowError::BadAgentName("Reviewer".into()));
     }
 
     #[test]

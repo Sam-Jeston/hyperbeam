@@ -6,13 +6,17 @@ use super::{ToolDef, ToolError, ToolOutput, ToolResult, arg_list, arg_opt, arg_s
 use crate::app::App;
 use crate::error::ApiError;
 use crate::knowledge::{self, Config};
+use crate::review;
 use crate::sessions::NewSession;
 use crate::store::{self, Link, Session};
 use hyperbeam_core::protocol::SessionStatus;
+use hyperbeam_core::GrantSet;
 use hyperbeam_core::workflow::SessionRole;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+pub const REPORT_VERDICT: &str = "hyperbeam_report_verdict";
+const MAX_FINDINGS_CHARS: usize = 20_000;
 const MAX_MEMORY_BYTES: usize = 64 * 1024;
 const MAX_QUESTION_CHARS: usize = 2000;
 /// How much of a document one read returns.
@@ -72,12 +76,37 @@ pub fn tools() -> Vec<ToolDef> {
         ),
         tool(
             "hyperbeam_spawn_agent",
-            "Start a worker agent in its own sandbox. It does not see this conversation: the prompt must be a complete brief.",
+            "Start a worker agent in its own sandbox. It does not see this conversation: the prompt must be a complete brief. \
+             If your workflow declares agents, pass one's name as `agent` to start it with its standing brief, skills and permissions.",
             schema(&[
-                ("title", "string", "Short name for the piece of work", true),
-                ("prompt", "string", "Complete instructions: goal, context, constraints, definition of done", true),
+                ("title", "string", "Short name for the piece of work. Required unless `agent` is given.", false),
+                (
+                    "prompt",
+                    "string",
+                    "Complete instructions: goal, context, constraints, definition of done. With `agent`, only what is particular to this piece of work, added to its standing brief.",
+                    false,
+                ),
+                ("agent", "string", "Name of one of your workflow's declared agents", false),
                 ("repos", "string[]", "Repositories (owner/name) to check out; must be among this session's", false),
                 ("skills", "string[]", "Skill names to install", false),
+                (
+                    "grants",
+                    "string[]",
+                    "The most the worker may do, e.g. [\"github:read\"] for one that must not change anything. Defaults to what you may do; it can only narrow that.",
+                    false,
+                ),
+                (
+                    "branch_of",
+                    "string",
+                    "Id of another of your workers: this one checks out that worker's branch instead of getting its own, to review or continue its work",
+                    false,
+                ),
+                (
+                    "verdict",
+                    "boolean",
+                    "The worker must end by reporting a verdict, approve or request_changes, which arrives with its report. Use for reviews.",
+                    false,
+                ),
                 ("harness", "string", "Harness profile name; defaults to this session's", false),
                 ("model", "string", "Model for the worker; defaults to this session's. Use a cheaper model for routine pieces.", false),
             ]),
@@ -92,6 +121,20 @@ pub fn tools() -> Vec<ToolDef> {
             true,
         ),
         tool("hyperbeam_stop_agent", "Stop a worker agent and tear down its sandbox.", schema(&[("id", "string", "Agent session id", true)]), true),
+        tool(
+            REPORT_VERDICT,
+            "Report the verdict of your review. Call it once you have finished looking, then end your turn; your conductor acts on it.",
+            schema(&[
+                ("verdict", "string", "`approve` if the work can ship as it stands, otherwise `request_changes`", true),
+                (
+                    "findings",
+                    "string",
+                    "For request_changes: what must change and where, specifically enough for another agent to act on. For approve: what you checked.",
+                    true,
+                ),
+            ]),
+            false,
+        ),
     ]
 }
 
@@ -236,6 +279,15 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
                 if !["scoping", "building", "review", "done"].contains(&status) {
                     return Err(ToolError::Failed("status must be scoping, building, review or done".into()));
                 }
+                if matches!(status, "review" | "done")
+                    && let Some(state) = review::loop_around(&app.db, session).await?
+                    && state.standing != review::Standing::Approved
+                {
+                    return Err(ToolError::Denied(format!(
+                        "this work runs a loop, and `{}` has not approved it (round {} of {}); the workstream stays where it is until it does",
+                        state.review, state.rounds, state.max_rounds
+                    )));
+                }
                 sqlx::query("UPDATE workstreams SET status = $2, updated_at = now() WHERE id = $1").bind(ws).bind(status).execute(&app.db).await?;
                 app.activity(None, Some(session), None, "workstream.status", &format!("“{}” moved its workstream to {status}", session.title), json!({ "status": status })).await;
                 done.push(format!("status → {status}"));
@@ -278,9 +330,67 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             ))
         }
         "hyperbeam_spawn_agent" => {
-            let title = arg_str(args, "title")?;
-            let prompt = arg_str(args, "prompt")?;
-            let repos = arg_list(args, "repos");
+            // A declared agent brings its own brief, skills and limits; the
+            // arguments add to them, and can narrow but never widen.
+            let plan = review::plan_of(&app.db, session.id).await?.unwrap_or_default();
+            let name = arg_opt(args, "agent");
+            let spec = match name {
+                Some(name) => plan.agents.get(name).cloned().ok_or_else(|| {
+                    let declared: Vec<String> = plan.agents.keys().map(|name| format!("`{name}`")).collect();
+                    ToolError::Failed(match declared.is_empty() {
+                        true => format!("this session's workflow declares no agents, so there is no `{name}`; leave `agent` out and give a title and a full prompt"),
+                        false => format!("no agent named `{name}`; this workflow declares {}", declared.join(", ")),
+                    })
+                })?,
+                None => Default::default(),
+            };
+            let state = review::loop_state(&app.db, session.id).await?.filter(|state| state.covers(name));
+            if let Some(state) = &state
+                && state.exhausted()
+            {
+                return Err(ToolError::Denied(state.refusal()));
+            }
+
+            let brief = [spec.prompt.trim(), arg_opt(args, "prompt").unwrap_or_default()].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n\n");
+            if brief.is_empty() {
+                return Err(ToolError::Failed("missing required argument `prompt`".into()));
+            }
+            let title = match (arg_opt(args, "title"), name, &state) {
+                (Some(title), _, _) => title.to_string(),
+                (None, Some(name), Some(state)) if name == state.review => format!("{name} (round {})", state.rounds + 1),
+                (None, Some(name), _) => name.to_string(),
+                (None, None, _) => return Err(ToolError::Failed("missing required argument `title`".into())),
+            };
+
+            let shares = match (arg_opt(args, "branch_of"), &spec.branch_of) {
+                (Some(_), _) => Some(child(app, session, &json!({ "id": args["branch_of"] })).await?),
+                (None, Some(other)) => {
+                    let latest: Option<Session> = sqlx::query_as(&format!(
+                        "SELECT {} FROM sessions WHERE parent_id = $1 AND agent = $2 ORDER BY created_at DESC LIMIT 1",
+                        store::SESSION_COLUMNS
+                    ))
+                    .bind(session.id)
+                    .bind(other)
+                    .fetch_optional(&app.db)
+                    .await?;
+                    Some(latest.ok_or_else(|| {
+                        ToolError::Failed(format!(
+                            "`{}` works on the branch of `{other}`, and you have not started a `{other}` yet. Start it first, and wait for it to report that its work is pushed.",
+                            name.unwrap_or_default()
+                        ))
+                    })?)
+                }
+                (None, None) => None,
+            };
+
+            let repos = match (arg_list(args, "repos"), &shares) {
+                (asked, _) if !asked.is_empty() => asked,
+                _ if !spec.repos.is_empty() => spec.repos.clone(),
+                (_, Some(other)) => other.repos.0.clone(),
+                // A declared agent works on the workflow's repositories.
+                _ if name.is_some() => session.repos.0.clone(),
+                _ => Vec::new(),
+            };
             for repo in &repos {
                 if !session.repos.iter().any(|r| r.eq_ignore_ascii_case(repo)) {
                     return Err(ToolError::Denied(format!(
@@ -288,46 +398,79 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
                         session.repos.join(", ")
                     )));
                 }
+                if let Some(other) = &shares
+                    && !other.repos.iter().any(|r| r.eq_ignore_ascii_case(repo))
+                {
+                    return Err(ToolError::Failed(format!(
+                        "“{}” does not work on `{repo}`, so its branch `{}` is not there to share",
+                        other.title, other.work_branch
+                    )));
+                }
             }
+
+            let asked = arg_list(args, "grants");
+            let asked = match asked.is_empty() {
+                true => None,
+                false => Some(GrantSet::parse_many(&asked).map_err(|err| ToolError::Failed(format!("in `grants`: {err}")))?),
+            };
+            let grants = match (spec.grants.clone(), asked) {
+                (Some(declared), Some(asked)) => Some(declared.intersect(&asked)),
+                (declared, asked) => declared.or(asked),
+            };
+            let mut skills = spec.skills.clone();
+            skills.extend(arg_list(args, "skills"));
+            let reports_verdict = spec.verdict || args.get("verdict").and_then(Value::as_bool).unwrap_or(false);
+
             let user = store::user_by_id(&app.db, session.created_by)
                 .await?
                 .filter(|u| !u.disabled)
                 .ok_or_else(|| ToolError::Denied("the person who started this session no longer has access".into()))?;
-            let harness = match arg_opt(args, "harness") {
-                Some(name) => name.to_string(),
+            let chosen = arg_opt(args, "harness").map(str::to_string).or_else(|| spec.harness.clone());
+            let harness = match &chosen {
+                Some(name) => name.clone(),
                 None => store::harness_by_id(&app.db, session.harness_id).await?.map(|h| h.name).unwrap_or_default(),
             };
             let worker = app
                 .create_session(
                     &user,
                     NewSession {
-                        title: Some(title.to_string()),
-                        prompt: prompt.to_string(),
+                        title: Some(title.clone()),
+                        prompt: brief,
                         workstream_id: session.workstream_id,
                         parent: Some(session.clone()),
                         role: SessionRole::Worker,
                         harness: Some(harness),
                         repos,
-                        skills: arg_list(args, "skills"),
-                        grants: None,
+                        skills,
+                        grants,
                         workflow: None,
+                        plan: None,
+                        agent: name.map(str::to_string),
+                        reports_verdict,
+                        branch_of: shares.clone(),
                         // Same harness: inherit the conductor's choice unless told otherwise.
-                        model: arg_opt(args, "model").map(str::to_string).or_else(|| {
-                            arg_opt(args, "harness").is_none().then(|| session.model.clone()).flatten()
-                        }),
+                        model: arg_opt(args, "model")
+                            .map(str::to_string)
+                            .or_else(|| spec.model.clone())
+                            .or_else(|| chosen.is_none().then(|| session.model.clone()).flatten()),
                         // Settled from the worker's repositories and this session's own.
                         environment: None,
                         context: None,
                     },
                 )
                 .await?;
-            Ok(ToolOutput::new(
-                title,
-                format!(
-                    "Started worker agent {} (“{}”) on branch {}. You will be prompted when it finishes a turn; end your turn once you have delegated everything you can.",
-                    worker.id, worker.title, worker.work_branch
+            let mut text = match &shares {
+                Some(other) => format!(
+                    "Started worker agent {} (“{}”) on branch {}, which it shares with “{}”.",
+                    worker.id, worker.title, worker.work_branch, other.title
                 ),
-            ))
+                None => format!("Started worker agent {} (“{}”) on branch {}.", worker.id, worker.title, worker.work_branch),
+            };
+            if reports_verdict {
+                text.push_str(" It will report a verdict, which arrives with its report.");
+            }
+            text.push_str(" You will be prompted when it finishes a turn; end your turn once you have delegated everything you can.");
+            Ok(ToolOutput::new(title, text))
         }
         "hyperbeam_list_agents" => {
             let agents: Vec<Session> = sqlx::query_as(&format!("SELECT {} FROM sessions WHERE parent_id = $1 ORDER BY created_at", store::SESSION_COLUMNS))
@@ -349,6 +492,22 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
         "hyperbeam_message_agent" => {
             let agent = child(app, session, args).await?;
             let text = arg_str(args, "text")?;
+            if let Some(state) = review::loop_state(&app.db, session.id).await?
+                && state.covers(agent.agent.as_deref())
+                && state.exhausted()
+            {
+                return Err(ToolError::Denied(state.refusal()));
+            }
+            // An agent declared `fresh` gives one verdict and is then done.
+            if let Some(name) = &agent.agent
+                && review::plan_of(&app.db, session.id).await?.is_some_and(|plan| plan.agents.get(name).is_some_and(|spec| spec.fresh))
+                && !review::latest_verdicts(&app.db, &[agent.id]).await?.is_empty()
+            {
+                return Err(ToolError::Failed(format!(
+                    "“{}” has given its verdict, and `{name}` is started anew each time rather than resumed: start another with `hyperbeam_spawn_agent`",
+                    agent.title
+                )));
+            }
             // Whatever the conductor says next is its answer to a waiting worker.
             app.clear_question(agent.id, None).await?;
             app.send_input(&agent, None, &format!("{} (conductor)", session.title), text).await?;
@@ -358,6 +517,21 @@ pub async fn call(app: &App, session: &Session, name: &str, args: &Value) -> Too
             let agent = child(app, session, args).await?;
             app.end_session(agent.id, SessionStatus::Cancelled, None).await;
             Ok(ToolOutput::new(agent.title.clone(), format!("Stopped “{}”.", agent.title)))
+        }
+        REPORT_VERDICT => {
+            let verdict = match arg_str(args, "verdict")? {
+                "approve" | "approved" => review::APPROVE,
+                "request_changes" | "changes_requested" => review::REQUEST_CHANGES,
+                _ => return Err(ToolError::Failed("verdict must be `approve` or `request_changes`".into())),
+            };
+            let findings = match (arg_opt(args, "findings"), verdict) {
+                (Some(findings), _) => super::clip(findings, MAX_FINDINGS_CHARS),
+                (None, review::APPROVE) => "Approved.".to_string(),
+                (None, _) => return Err(ToolError::Failed("say what must change in `findings`".into())),
+            };
+            let recorded = app.record_verdict(session, verdict, &findings).await.map_err(ApiError::from)?;
+            let to = if session.parent_id.is_some() { "Your conductor is told when you end your turn" } else { "It is shown on this session" };
+            Ok(ToolOutput::new(recorded.past_tense(), format!("Verdict recorded: {}. {to}. End your turn now.", recorded.verdict)))
         }
         other => Err(ToolError::Failed(format!("no tool named `{other}`"))),
     }

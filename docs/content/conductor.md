@@ -19,6 +19,16 @@ A worker started by a conductor can hold at most what the conductor holds. If th
 
 Workers use the conductor’s model unless the conductor chooses another for a piece of work.
 
+## Reviewers and shared branches
+
+A conductor can start a worker that may do less than it can, such as a reviewer that reads the code but can't push. It can put a worker on another worker's branch, and ask it to end with a verdict instead of only a report. You can ask for this in your prompt:
+
+```text
+Have one agent build it, then a second, read-only agent review that branch and give a verdict.
+```
+
+To make this a fixed part of how a kind of work is done, declare the agents in a [workflow](/workflows#agents), and add a [loop](/workflows#loops) to have Hyperbeam count the rounds and stop the work being called done before the review approves.
+
 ## Questions from workers
 
 When a worker asks a question, its conductor is prompted with it and answers by messaging the worker. If the decision is not the conductor's to make, it asks you instead and passes your answer on. You can also answer a worker directly from its page. See [Questions from the agent](/sessions#questions-from-the-agent).

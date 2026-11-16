@@ -1,0 +1,45 @@
+# Paste into Library → Workflows → New workflow.
+#
+# A conductor runs an implementer and a reviewer in a loop until the reviewer
+# approves. The platform counts the rounds, stops the loop at max_rounds, and
+# will not let the work be called done before an approval.
+name: build-and-review
+description: Build a change, have it reviewed, and repeat until the review approves
+role: conductor
+repos:
+  - acme/api
+grants:
+  - github:write
+  - github:open_pr
+inputs:
+  - name: goal
+    description: What to build, and how you will know it works
+agents:
+  implementer:
+    description: Builds the change and fixes what the reviewer finds
+    prompt: |
+      Build this: {{goal}}
+
+      Work in small commits and run the tests. Push your branch before you end each turn,
+      because the reviewer reads what is pushed. Do not open a pull request.
+      When you are sent review findings, address every one, or say why one is wrong.
+  reviewer:
+    description: Reviews the implementer's branch against the goal
+    grants: [github:read]        # it can read the work but not change it
+    fresh: true                  # a new reviewer each round, not anchored on the last
+    # model: opus                # a reviewer can run on a different model
+    prompt: |
+      Review the work on this branch against this goal: {{goal}}
+
+      Read the diff against the default branch and run the tests. Look for behaviour that is
+      wrong or missing, not for style. Request changes only for what must be fixed before
+      this ships, and say exactly where and what.
+loop:
+  implement: implementer
+  review: reviewer
+  max_rounds: 4
+prompt: |
+  Goal: {{goal}}
+
+  Run the loop until the reviewer approves. Then ask the implementer to open a pull request,
+  and report the link with a one-paragraph summary of what was built and what review changed.

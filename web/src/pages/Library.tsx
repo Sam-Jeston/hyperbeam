@@ -24,6 +24,8 @@ grants:                    # the most these agents may do
 inputs:
   - name: feature
     description: What to build, and how you will know it works
+# agents: and loop: declare named workers and an implement-and-review
+# loop the platform enforces. See the Workflows page of the docs.
 prompt: |
   Build this feature: {{feature}}
 
@@ -190,6 +192,7 @@ function Workflows() {
                 !wf.spec ? <Badge tone="fail">Invalid</Badge> : (
                   <>
                     {wf.spec.role === "conductor" && <Badge tone="primary">Conductor</Badge>}
+                    {wf.spec.loop && <Badge tone="outline">Loop · {wf.spec.loop.max_rounds} rounds</Badge>}
                     {wf.spec.repos.slice(0, 2).map((r) => <Badge key={r} mono>{r}</Badge>)}
                     {wf.spec.repos.length > 2 && <span>+{wf.spec.repos.length - 2}</span>}
                   </>
