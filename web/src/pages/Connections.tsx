@@ -182,6 +182,13 @@ const AUTH_OPTIONS = [
   { value: "none", label: "No credential", description: "For servers inside your network that need none" },
 ];
 
+/** What the whole team holds on a new connection; people are changed one by one afterwards. */
+const ACCESS_OPTIONS = [
+  { value: "read", label: "Read only", description: "Everyone’s agents can use its read tools" },
+  { value: "read_write", label: "Read and write", description: "Everyone’s agents can use its read and write tools" },
+  { value: "off", label: "Off", description: "Nobody’s agents can use it until you give them permission" },
+];
+
 function authKind(connection: Connection | null): string {
   if (connection?.auth.oauth) return "oauth";
   if (!connection?.auth.header) return connection ? "none" : "bearer";
@@ -204,6 +211,7 @@ function ConnectionDialog(props: { preset: Preset | null; connection: Connection
   const [clientId, setClientId] = useState(connection?.auth.oauth?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [scope, setScope] = useState(connection?.auth.oauth?.scope ?? "");
+  const [access, setAccess] = useState("read");
   const action = useAction();
   const label = preset?.title ?? (connection?.title || "custom connection");
   const oauth = preset ? preset.auth === "oauth" : auth === "oauth";
@@ -228,7 +236,7 @@ function ConnectionDialog(props: { preset: Preset | null; connection: Connection
             auth: { kind: auth, header: header.trim() || undefined, client_id: clientId.trim() || undefined, client_secret: clientSecret || undefined, scope: scope.trim() || undefined },
             secret: secret || undefined,
           };
-      const result: Saved = connection ? await api.patch(`/connections/${connection.name}`, body) : await api.post("/connections", body);
+      const result: Saved = connection ? await api.patch(`/connections/${connection.name}`, body) : await api.post("/connections", { ...body, default_access: access });
       if (result.authorize_url) await signIn(result.authorize_url);
       else {
         toast.success(`${label} ${connection ? "updated" : "connected"}`);
@@ -327,6 +335,11 @@ function ConnectionDialog(props: { preset: Preset | null; connection: Connection
           hint={connection ? "Leave blank to keep the current one. Stored encrypted and never shown again." : "Stored encrypted and never shown again."}
         >
           {(id) => <Input id={id} type="password" mono autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={connection ? "••••••••••••" : undefined} />}
+        </Field>
+      )}
+      {!connection && (
+        <Field label="Default access" hint="What everyone on the team, you included, starts with. Change it for each person under People & permissions.">
+          {(id) => <Select id={id} value={access} onValueChange={setAccess} options={ACCESS_OPTIONS} />}
         </Field>
       )}
       <ErrorNote error={action.error} />

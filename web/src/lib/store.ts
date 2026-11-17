@@ -116,8 +116,8 @@ async function loadTeam() {
 
 /** After connections change: what can be granted, and who holds what. */
 export async function reloadGrants() {
-  const [grants, users] = await Promise.all([api.get("/grants"), api.get("/users")]);
-  set({ grants: grants.grants, users: byId<User>(users.users) });
+  const [grants, users, me] = await Promise.all([api.get("/grants"), api.get("/users"), api.get("/me")]);
+  set({ grants: grants.grants, users: byId<User>(users.users), me: me.user });
 }
 
 export async function reloadUsers() {

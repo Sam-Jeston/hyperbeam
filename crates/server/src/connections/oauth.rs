@@ -7,7 +7,7 @@
 //! that (RFC 7591). Tokens are stored like any other credential: encrypted,
 //! in the control plane, never in a sandbox.
 
-use super::{Auth, Connection, by_name, secret_key};
+use super::{Auth, Connection, DefaultAccess, by_name, secret_key};
 use crate::app::App;
 use crate::store;
 use anyhow::{Context, Result, anyhow, bail};
@@ -92,6 +92,8 @@ pub struct Spec {
     pub url: String,
     pub headers: BTreeMap<String, String>,
     pub options: Value,
+    /// Handed out if the sign-in creates the connection.
+    pub default_access: DefaultAccess,
 }
 
 /// An OAuth client an admin created with the server's vendor.
@@ -448,7 +450,7 @@ impl App {
 
     /// Save a finished sign-in: the tokens, and the connection they are for.
     pub async fn save_oauth(&self, pending: &Pending, tokens: &Tokens) -> Result<()> {
-        let Spec { name, preset, title, url, headers, options } = &pending.spec;
+        let Spec { name, preset, title, url, headers, options, .. } = &pending.spec;
         store::put_secret(&self.db, &self.secrets, &secret_key(name), &tokens.access).await?;
         match &tokens.refresh {
             Some(refresh) => store::put_secret(&self.db, &self.secrets, &refresh_key(name), refresh).await?,

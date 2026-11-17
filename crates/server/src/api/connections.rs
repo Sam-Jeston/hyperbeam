@@ -3,13 +3,13 @@
 use crate::app::App;
 use crate::auth::AuthUser;
 use crate::connections::oauth::{self, Client, Spec};
-use crate::connections::{self, Approval, Auth, Connection, RESERVED, ToolLevel, presets};
+use crate::connections::{self, Approval, Auth, Connection, DefaultAccess, RESERVED, ToolLevel, presets};
 use crate::error::{ApiError, ApiResult};
 use crate::store;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::response::Redirect;
-use hyperbeam_core::GrantSet;
+use hyperbeam_core::{Grant, GrantSet};
 use hyperbeam_core::grants::valid_system;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -86,6 +86,9 @@ pub struct ConnectionBody {
     options: Option<Value>,
     /// Optional when updating.
     secret: Option<String>,
+    /// When connecting: what everyone on the team holds to begin with.
+    #[serde(default)]
+    default_access: DefaultAccess,
 }
 
 /// Headers the gateway sets itself, or that would break the request.
@@ -225,7 +228,7 @@ pub async fn create(State(app): State<App>, actor: AuthUser, Json(body): Json<Co
             None => custom_oauth.map(AuthBody::client).transpose()?.flatten(),
         };
         let scope = custom_oauth.and_then(|a| trimmed(&a.scope));
-        let spec = Spec { name, preset: preset.map(str::to_string), title, url, headers, options };
+        let spec = Spec { name, preset: preset.map(str::to_string), title, url, headers, options, default_access: body.default_access };
         return sign_in(&app, spec, client, None, scope, &actor).await;
     }
     save_secret(&app, &name, &auth, body.secret.as_deref(), true).await?;
@@ -243,6 +246,7 @@ pub async fn create(State(app): State<App>, actor: AuthUser, Json(body): Json<Co
     .bind(actor.0.id)
     .execute(&app.db)
     .await?;
+    grant_system(&app, &name, body.default_access).await?;
     app.activity(Some(actor.0.id), None, None, "integration.connected", &format!("{} connected {title}", actor.0.name), json!({ "connection": name })).await;
     saved(&app, &name).await
 }
@@ -268,6 +272,7 @@ pub async fn authorize(State(app): State<App>, actor: AuthUser, Path(name): Path
         url: current.url.clone(),
         headers: current.headers.0.clone(),
         options: current.options.0.clone(),
+        default_access: DefaultAccess::Off,
     };
     // Scopes an admin chose stand; otherwise ask the server again.
     let scope = oauth.scope.clone();
@@ -315,6 +320,7 @@ async fn finish_sign_in(app: &App, actor: Result<AuthUser, ApiError>, params: Ca
     let existed = connections::by_name(&app.db, &name).await.map_err(|e| internal(e.into()))?.is_some();
     app.save_oauth(&pending, &tokens).await.map_err(internal)?;
     if !existed {
+        grant_system(app, &name, pending.spec.default_access).await.map_err(|err| internal(anyhow::anyhow!("{err:?}")))?;
         app.activity(Some(actor.0.id), None, None, "integration.connected", &format!("{} connected {title}", actor.0.name), json!({ "connection": name })).await;
     }
     app.mcp.reset();
@@ -368,7 +374,7 @@ pub async fn update(State(app): State<App>, actor: AuthUser, Path(name): Path<St
             // The same client with no new secret keeps the secret it has.
             let client = client.filter(|c| c.secret.is_some() || Some(&c.id) != supplied.as_ref());
             let scope = scope.or_else(|| signed_in.filter(|_| !moved).and_then(|o| o.scope.clone()));
-            let spec = Spec { name, preset: current.preset.clone(), title, url, headers, options };
+            let spec = Spec { name, preset: current.preset.clone(), title, url, headers, options, default_access: DefaultAccess::Off };
             return sign_in(&app, spec, client, Some(&current), scope, &actor).await;
         }
         // Nothing about the sign-in changed: keep it, and its tokens.
@@ -412,6 +418,24 @@ pub async fn delete(State(app): State<App>, actor: AuthUser, Path(name): Path<St
     revoke_system(&app, &name).await?;
     app.activity(Some(actor.0.id), None, None, "integration.disconnected", &format!("{} disconnected {}", actor.0.name, conn.title), json!({ "connection": name })).await;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Give a new connection's permissions to everyone on the team, and to
+/// everyone invited who has yet to join.
+async fn grant_system(app: &App, system: &str, access: DefaultAccess) -> ApiResult<()> {
+    let Some(level) = access.level() else { return Ok(()) };
+    let grant = Grant::new(system, level).map_err(|e| ApiError::bad(e.to_string()))?;
+    for (table, current) in [("users", "NOT disabled"), ("invites", "accepted_at IS NULL")] {
+        let rows: Vec<(uuid::Uuid, SqlJson<GrantSet>)> = sqlx::query_as(&format!("SELECT id, grants FROM {table} WHERE {current}")).fetch_all(&app.db).await?;
+        for (id, SqlJson(mut grants)) in rows {
+            let before = grants.clone();
+            grants.insert(grant.clone());
+            if grants != before {
+                sqlx::query(&format!("UPDATE {table} SET grants = $2 WHERE id = $1")).bind(id).bind(json!(grants)).execute(&app.db).await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Take every grant on `system` away from everyone, invited or joined.

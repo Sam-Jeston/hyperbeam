@@ -35,7 +35,7 @@ Removing a repository stops new agents from using it. Agents already running kee
 
 Everything else is a **connection**: an MCP server that agents reach through Hyperbeam’s tool gateway. Hyperbeam calls the server from the control plane with the connection’s credential, so agents never see the credential or reach the server directly. A connection’s tools appear to agents as `<name>_<tool>`, for example `sentry_search_issues`.
 
-Each of a connection’s tools is a **read** tool, a **write** tool, or **hidden**. Agents use read tools with `<name>:read` and write tools with `<name>:write`, which you grant per person under [People & permissions](/permissions). A new connection’s permissions are granted to nobody, its creator included, until you tick them.
+Each of a connection’s tools is a **read** tool, a **write** tool, or **hidden**. Agents use read tools with `<name>:read` and write tools with `<name>:write`, which you grant per person under [People & permissions](/permissions). When you connect one, **Default access** sets what everyone on the team starts with, you included: **Read only**, **Read and write**, or **Off**. It applies to the people and pending invites there are at that moment; after that, each person’s permissions are their own to change.
 
 Select **Tools** on a connection to see what it offers and change what each tool is for. Your choice for a tool overrides whatever Hyperbeam decided automatically.
 
@@ -90,7 +90,7 @@ The access and refresh tokens are stored encrypted in the control plane, like ev
 
 ### Disconnecting
 
-**Disconnect** deletes the credential, stops agents using the connection straight away, and removes everyone’s permissions for it. A later connection with the same name starts with nobody holding its permissions.
+**Disconnect** deletes the credential, stops agents using the connection straight away, and removes everyone’s permissions for it. A later connection with the same name starts again from the default access you choose for it.
 
 > [!NOTE]
 > GitHub App mode, GitLab and the first-class connections are written against the vendors’ documentation but have not yet been tested against the real services. See [What is verified](/status).

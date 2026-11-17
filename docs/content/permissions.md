@@ -27,7 +27,7 @@ An admin’s own agents are still limited to the grants ticked for them. Being a
 | `web:read` | read public web pages with `web_fetch`. See [Web access](/security#web-access) |
 | `<connection>:read` / `<connection>:write` | use a [connection](/integrations#connected-services)’s read / write tools, e.g. `linear:write`, `notion:read` |
 
-Each connection adds its own two columns to **People & permissions**. Only permissions on GitHub, GitLab once it is connected, the web (unless an admin has turned web access off) and connections that exist can be granted.
+Each connection adds its own two columns to **People & permissions**, ticked to begin with according to the [default access](/integrations#connected-services) chosen when it was connected. Only permissions on GitHub, GitLab once it is connected, the web (unless an admin has turned web access off) and connections that exist can be granted.
 
 The platform’s own tools need no grant: team notes, questions, and publishing to the [knowledge base](/knowledge-base). That holds when the knowledge base is kept in Notion, too: a session without `notion:write` can still publish a document under the one Notion page an admin chose, and nothing else in Notion.
 

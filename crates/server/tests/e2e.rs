@@ -1571,6 +1571,21 @@ async fn connections_proxy_only_what_admins_and_grants_allow() {
     // Disconnecting takes the permissions with it, so a later connection of the same name starts from nothing.
     owner.ok(Method::DELETE, "/connections/acme-tools", None).await;
     assert_eq!(mia.get("/me").await["user"]["grants"], json!(["linear:read"]));
+    assert!(!owner.get("/me").await["user"]["grants"].to_string().contains("acme-tools"), "no default access was asked for");
+
+    // Unless it is connected with a default: then everyone holds that much, joined or invited.
+    let invited = owner.post("/invites", json!({ "email": "kai@example.com", "role": "member", "grants": [] })).await;
+    let acme = |access: &str| json!({ "name": "acme-tools", "url": format!("{}/custom/mcp", h.mcp_base), "auth": { "kind": "header", "header": "X-Api-Key" }, "secret": "k-custom", "default_access": access });
+    owner.post("/connections", acme("read")).await;
+    assert_eq!(mia.get("/me").await["user"]["grants"], json!(["acme-tools:read", "linear:read"]));
+    assert!(owner.get("/me").await["user"]["grants"].as_array().unwrap().contains(&json!("acme-tools:read")));
+    let invite = owner.get("/invites").await["invites"].as_array().unwrap().iter().find(|i| i["id"] == invited["id"]).cloned().expect("the invite");
+    assert_eq!(invite["grants"], json!(["acme-tools:read"]));
+    owner.ok(Method::DELETE, "/connections/acme-tools", None).await;
+    owner.post("/connections", acme("read_write")).await;
+    assert_eq!(mia.get("/me").await["user"]["grants"], json!(["acme-tools:read", "acme-tools:write", "linear:read"]));
+    let (status, _) = owner.call(Method::POST, "/connections", Some(json!({ "preset": "exa", "secret": "k", "default_access": "everything" }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1587,7 +1602,7 @@ async fn notion_connects_by_oauth_and_keeps_its_token_fresh() {
     // Connecting takes no key: the admin is sent to Notion to sign in. A member is not.
     let mia = h.member(&owner, "mia@example.com", &[]).await;
     assert_eq!(mia.call(Method::POST, "/connections", Some(json!({ "preset": "notion" }))).await.0, StatusCode::FORBIDDEN);
-    let started = owner.post("/connections", json!({ "preset": "notion" })).await;
+    let started = owner.post("/connections", json!({ "preset": "notion", "default_access": "read" })).await;
     let authorize = started["authorize_url"].as_str().expect("an authorize URL").to_string();
     assert!(authorize.starts_with(&format!("{}/notion-auth/authorize?", h.mcp_base)), "{authorize}");
     assert!(notion(&owner.get("/connections").await).is_none(), "nothing is saved before the sign-in finishes");
@@ -1603,6 +1618,8 @@ async fn notion_connects_by_oauth_and_keeps_its_token_fresh() {
     assert_eq!(location(&finished), "/settings/integrations?connected=notion");
 
     let conn = notion(&owner.get("/connections").await).expect("Notion is connected");
+    // The default access asked for when connecting is handed out once the sign-in finishes.
+    assert_eq!(mia.get("/me").await["user"]["grants"], json!(["notion:read"]));
     assert_eq!(conn["tools_error"], Value::Null, "{conn}");
     let levels: Vec<String> = conn["tools"].as_array().unwrap().iter().map(|t| format!("{}={}/{}", t["name"].as_str().unwrap(), t["level"].as_str().unwrap(), t["status"].as_str().unwrap())).collect();
     assert_eq!(levels, ["notion-search=read/automatic", "notion-create-pages=write/automatic", "notion-summon=hidden/pending"]);

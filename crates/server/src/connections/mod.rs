@@ -50,6 +50,29 @@ impl ToolLevel {
     }
 }
 
+/// What everyone on the team holds on a connection when it is first made.
+/// After that, permissions are each person's own, like any other.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultAccess {
+    /// Nobody holds anything until an admin ticks it.
+    #[default]
+    Off,
+    Read,
+    ReadWrite,
+}
+
+impl DefaultAccess {
+    /// The strongest level handed out; it implies the weaker.
+    pub fn level(self) -> Option<Level> {
+        match self {
+            DefaultAccess::Off => None,
+            DefaultAccess::Read => Some(Level::Read),
+            DefaultAccess::ReadWrite => Some(Level::Write),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Auth {
     /// Header that carries the credential; `None` sends no credential.
